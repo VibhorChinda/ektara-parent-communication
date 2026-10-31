@@ -1,0 +1,81 @@
+services:
+  # FastAPI backend. Free plan for testing: it sleeps after 15 idle minutes and
+  # answers Twilio slowly while waking. Switch to `starter` for real use.
+  - type: web
+    name: parent-comm-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: TWILIO_VOICE_FROM
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: CALL_FALLBACK_HOURS
+        value: "6"
+      - key: CALL_WINDOW_START
+        value: "09:00"
+      - key: CALL_WINDOW_END
+        value: "19:00"
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: SEND_CONCURRENCY
+        value: "10"
+
+  # Next.js admin app. NEXT_PUBLIC_* values are baked in at build time,
+  # so redeploy after changing them.
+  - type: web
+    name: parent-comm-web
+    runtime: node
+    plan: free
+    rootDir: web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false
+
+  # Cron jobs are paid on Render, so this is off while testing on the free plan.
+  # Uncomment it (and switch the API to `starter`) for real use.
+  # Calls the backend every 15 minutes: IVR fallback calls + template status sync.
+  # - type: cron
+  #   name: parent-comm-cron
+  #   runtime: python
+  #   schedule: "*/15 * * * *"
+  #   buildCommand: echo "no build needed"
+  #   startCommand: >-
+  #     curl -fsS -X POST
+  #     -H "X-Cron-Secret: $CRON_SECRET"
+  #     "$PUBLIC_BASE_URL/internal/cron/tick"
+  #   envVars:
+  #     - key: CRON_SECRET
+  #       sync: false
+  #     - key: PUBLIC_BASE_URL
+  #       sync: false
