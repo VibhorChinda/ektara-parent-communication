@@ -2,31 +2,21 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Icon from "@/components/Icon";
+import MessageDrawer from "@/components/MessageDrawer";
 import ResponseBar, { Legend } from "@/components/ResponseBar";
 import StatusBadge, { statusLabel } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import WhatsAppPreview from "@/components/WhatsAppPreview";
-import { Alert, Button, Card, PageHeader, SearchInput, Skeleton, Tabs } from "@/components/ui";
+import { Alert, Button, Card, Modal, PageHeader, SearchInput, Skeleton, Tabs } from "@/components/ui";
 import { api } from "@/lib/api";
-import { plainError } from "@/lib/errors";
 import { downloadCsv, formatDate, percent, timeAgo } from "@/lib/format";
+import { messageDetails } from "@/lib/messages";
 import { GROUPS, groupCount, type GroupKey } from "@/lib/status";
-import type { CampaignDetail, Message } from "@/lib/types";
+import type { CampaignDetail } from "@/lib/types";
 
 const POLL_MS = 10_000;
-
-function details(m: Message): string {
-  if (m.status === "confirmed" || m.status === "declined") {
-    return m.confirmed_via === "voice" ? "Answered on the phone call" : "Answered on WhatsApp";
-  }
-  if (m.call_status) return `Call: ${m.call_status.replace("-", " ")}`;
-  if (m.wa_error) return plainError(m.wa_error);
-  if (!m.parents.has_whatsapp) return "No WhatsApp: will be called";
-  if (m.status === "read") return "Read, no reply yet";
-  return "";
-}
 
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,18 +26,22 @@ export default function CampaignDetailPage() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [tab, setTab] = useState<GroupKey | "all">("all");
   const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [busy, setBusy] = useState<"stop" | "retry" | null>(null);
+
+  const load = useCallback(() => {
+    if (document.hidden) return; // don't poll in a background tab
+    api<CampaignDetail>(`/api/campaigns/${id}`)
+      .then((c) => {
+        setCampaign(c);
+        setUpdatedAt(new Date());
+        setError("");
+      })
+      .catch((e) => setError(e.message));
+  }, [id]);
 
   useEffect(() => {
-    function load() {
-      if (document.hidden) return; // don't poll in a background tab
-      api<CampaignDetail>(`/api/campaigns/${id}`)
-        .then((c) => {
-          setCampaign(c);
-          setUpdatedAt(new Date());
-          setError("");
-        })
-        .catch((e) => setError(e.message));
-    }
     load();
     const timer = setInterval(load, POLL_MS);
     document.addEventListener("visibilitychange", load);
@@ -55,7 +49,7 @@ export default function CampaignDetailPage() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", load);
     };
-  }, [id]);
+  }, [load]);
 
   if (error && !campaign) return <Alert>{error}</Alert>;
   if (!campaign) return <LoadingDetail />;
@@ -63,6 +57,8 @@ export default function CampaignDetailPage() {
   const counts = campaign.counts;
   const total = counts.total ?? 0;
   const flagged = counts.flagged ?? 0;
+  const cancelled = campaign.status === "cancelled";
+  const openMessage = campaign.messages.find((m) => m.id === openId) ?? null;
 
   const group = GROUPS.find((g) => g.key === tab);
   const q = query.trim().toLowerCase();
@@ -74,11 +70,36 @@ export default function CampaignDetailPage() {
   });
 
   function exportCsv() {
-    const rows = [["Parent", "Child", "Phone", "Status", "Details"]];
+    const rows = [["Parent", "Child", "Phone", "Status", "Details", "Reply"]];
     for (const m of messages) {
-      rows.push([m.parents.parent_name, m.parents.child_name ?? "", m.parents.phone_e164, statusLabel(m.status), details(m)]);
+      rows.push([m.parents.parent_name, m.parents.child_name ?? "", m.parents.phone_e164, statusLabel(m.status), messageDetails(m), m.reply_text ?? ""]);
     }
-    downloadCsv(`${campaign!.class_name}-${campaign!.template_name}-${tab}.csv`, rows);
+    downloadCsv(`${campaign!.audience}-${campaign!.template_name}-${tab}.csv`, rows);
+  }
+
+  async function stopCampaign() {
+    setBusy("stop");
+    try {
+      const r = await api<{ stopped: number }>(`/api/campaigns/${id}/cancel`, { method: "POST" });
+      toast(r.stopped ? `Stopped. ${r.stopped} unsent messages cancelled.` : "Stopped. No more calls will be made.");
+      setConfirmStop(false);
+      load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    setBusy(null);
+  }
+
+  async function retryFailed() {
+    setBusy("retry");
+    try {
+      const r = await api<{ retried: number }>(`/api/campaigns/${id}/retry-failed`, { method: "POST" });
+      toast(r.retried ? `Sending again to ${r.retried} parents` : "Nothing to retry: those parents are already being called");
+      load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    setBusy(null);
   }
 
   async function copyPhone(phone: string) {
@@ -97,13 +118,28 @@ export default function CampaignDetailPage() {
       </Link>
 
       <PageHeader
-        title={`Class ${campaign.class_name}`}
+        title={campaign.audience}
         description={
           <>
             <span className="font-medium text-zinc-700">{campaign.template_name}</span> &middot; sent {formatDate(campaign.created_at)}
+            {campaign.sender && <> by {campaign.sender}</>}
           </>
         }
-        actions={<LiveIndicator updatedAt={updatedAt} error={error} sending={campaign.status === "sending"} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {cancelled ? <StatusBadge status="cancelled" /> : <LiveIndicator updatedAt={updatedAt} error={error} sending={campaign.status === "sending"} />}
+            {!cancelled && (counts.failed ?? 0) > 0 && (
+              <Button variant="secondary" size="sm" onClick={retryFailed} loading={busy === "retry"} disabled={!!busy}>
+                <Icon name="refresh" className="size-3.5" /> Retry failed
+              </Button>
+            )}
+            {!cancelled && (
+              <Button variant="ghost" size="sm" onClick={() => setConfirmStop(true)} disabled={!!busy} className="text-red-600 hover:bg-red-50 hover:text-red-700">
+                Stop campaign
+              </Button>
+            )}
+          </div>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -144,7 +180,7 @@ export default function CampaignDetailPage() {
             <Alert tone="warning">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span>
-                  <b>{flagged} {flagged === 1 ? "parent needs" : "parents need"}</b> a personal follow-up. They didn&apos;t answer WhatsApp or the automatic call.
+                  <b>{flagged} {flagged === 1 ? "parent needs" : "parents need"}</b> a personal follow-up. They didn&apos;t answer WhatsApp or the automatic call. Open a row to record their answer.
                 </span>
                 <button onClick={() => setTab("flagged")} className="font-medium underline underline-offset-2">Show them</button>
               </div>
@@ -191,7 +227,7 @@ export default function CampaignDetailPage() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {messages.map((m) => (
-                  <tr key={m.id} className="group hover:bg-zinc-50">
+                  <tr key={m.id} onClick={() => setOpenId(m.id)} className="group cursor-pointer hover:bg-zinc-50">
                     <td className="px-4 py-3">
                       <p className="font-medium">{m.parents.parent_name}</p>
                       {m.parents.child_name && <p className="text-xs text-zinc-500">Parent of {m.parents.child_name}</p>}
@@ -199,16 +235,24 @@ export default function CampaignDetailPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         <span className="font-mono text-xs text-zinc-700">{m.parents.phone_e164}</span>
-                        <a href={`tel:${m.parents.phone_e164}`} title="Call" aria-label={`Call ${m.parents.parent_name}`} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900">
+                        <a href={`tel:${m.parents.phone_e164}`} onClick={(e) => e.stopPropagation()} title="Call" aria-label={`Call ${m.parents.parent_name}`} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900">
                           <Icon name="phone" className="size-3.5" />
                         </a>
-                        <button onClick={() => copyPhone(m.parents.phone_e164)} title="Copy number" aria-label="Copy number" className="rounded p-1 text-zinc-400 opacity-0 hover:bg-zinc-100 hover:text-zinc-900 focus:opacity-100 group-hover:opacity-100">
+                        <button onClick={(e) => { e.stopPropagation(); copyPhone(m.parents.phone_e164); }} title="Copy number" aria-label="Copy number" className="rounded p-1 text-zinc-400 opacity-0 hover:bg-zinc-100 hover:text-zinc-900 focus:opacity-100 group-hover:opacity-100">
                           <Icon name="copy" className="size-3.5" />
                         </button>
                       </div>
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
-                    <td className="px-4 py-3 text-zinc-500">{details(m)}</td>
+                    <td className="max-w-xs px-4 py-3 text-zinc-500">
+                      {messageDetails(m)}
+                      {m.reply_text && (
+                        <p className="mt-1 flex items-start gap-1.5 text-xs text-zinc-700">
+                          <Icon name="chat" className="mt-0.5 size-3.5 text-zinc-400" />
+                          <span className="line-clamp-2">&ldquo;{m.reply_text}&rdquo;</span>
+                        </p>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-400" title={formatDate(m.updated_at)}>
                       {timeAgo(m.updated_at)}
                     </td>
@@ -219,6 +263,22 @@ export default function CampaignDetailPage() {
           </Card>
         )}
       </div>
+
+      <MessageDrawer message={openMessage} onClose={() => setOpenId(null)} onChanged={load} />
+
+      <Modal
+        open={confirmStop}
+        title="Stop this campaign?"
+        onClose={() => busy !== "stop" && setConfirmStop(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmStop(false)} disabled={busy === "stop"}>Keep going</Button>
+            <Button variant="danger" onClick={stopCampaign} loading={busy === "stop"}>Stop campaign</Button>
+          </>
+        }
+      >
+        Messages not sent yet are cancelled and no more automatic calls are placed. Messages already delivered can&apos;t be taken back, and parents can still reply.
+      </Modal>
     </div>
   );
 }

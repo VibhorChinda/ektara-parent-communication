@@ -186,3 +186,56 @@ export function Modal({ open, title, onClose, children, footer }: { open: boolea
     </div>
   );
 }
+
+export function Chip({ active, onClick, children, count }: { active: boolean; onClick: () => void; children: React.ReactNode; count?: number }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition ${
+        active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300"
+      }`}
+    >
+      {children}
+      {count !== undefined && <span className={`ml-1.5 ${active ? "text-zinc-300" : "text-zinc-400"}`}>{count}</span>}
+    </button>
+  );
+}
+
+// Side panel for details of one row (a parent, a message).
+export function Drawer({ open, title, subtitle, onClose, children }: { open: boolean; title: string; subtitle?: React.ReactNode; onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-zinc-900/30 backdrop-blur-[2px]" onClick={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-title"
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-full max-w-lg flex-col bg-white shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4">
+          <div className="min-w-0">
+            <h2 id="drawer-title" className="truncate text-base font-semibold">{title}</h2>
+            {subtitle && <div className="mt-0.5 text-sm text-zinc-500">{subtitle}</div>}
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900">
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
+      </aside>
+    </div>
+  );
+}

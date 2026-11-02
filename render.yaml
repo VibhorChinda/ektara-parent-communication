@@ -1,6 +1,8 @@
 services:
-  # FastAPI backend. Free plan for testing: it sleeps after 15 idle minutes and
-  # answers Twilio slowly while waking. Switch to `starter` for real use.
+  # FastAPI backend. Free plan for testing: it sleeps after 15 idle minutes, and
+  # Twilio callbacks that arrive while it wakes up can be lost. The GitHub Actions
+  # cron (.github/workflows/cron-tick.yml) keeps it awake during the day and the
+  # tick recovers missed replies and statuses, but use `starter` for real campaigns.
   - type: web
     name: parent-comm-api
     runtime: python
@@ -42,6 +44,13 @@ services:
         value: Asia/Kolkata
       - key: SEND_CONCURRENCY
         value: "10"
+      # Rough prices for the estimate shown before sending; 0 hides it.
+      - key: COST_PER_WHATSAPP
+        value: "0"
+      - key: COST_PER_CALL
+        value: "0"
+      - key: COST_CURRENCY
+        value: INR
 
   # Next.js admin app. NEXT_PUBLIC_* values are baked in at build time,
   # so redeploy after changing them.
@@ -62,8 +71,8 @@ services:
       - key: NEXT_PUBLIC_API_BASE_URL
         sync: false
 
-  # Cron jobs are paid on Render, so this is off while testing on the free plan.
-  # Uncomment it (and switch the API to `starter`) for real use.
+  # Cron jobs are paid on Render. The free alternative is the GitHub Actions
+  # workflow in .github/workflows/cron-tick.yml. Use one of the two, not both.
   # Calls the backend every 15 minutes: IVR fallback calls + template status sync.
   # - type: cron
   #   name: parent-comm-cron

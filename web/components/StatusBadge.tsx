@@ -8,6 +8,7 @@ const STYLES: Record<string, string> = {
   declined: "bg-amber-50 text-amber-800",
   flagged: "bg-red-50 text-red-700",
   failed: "bg-zinc-100 text-zinc-700",
+  cancelled: "bg-zinc-50 text-zinc-400",
   // template statuses
   draft: "bg-zinc-100 text-zinc-600",
   pending_meta: "bg-amber-50 text-amber-800",

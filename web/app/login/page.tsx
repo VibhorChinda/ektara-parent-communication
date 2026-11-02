@@ -13,6 +13,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   // Already logged in: skip this page.
   useEffect(() => {
@@ -32,6 +34,59 @@ export default function LoginPage() {
       return;
     }
     router.push("/campaigns");
+  }
+
+  async function sendReset(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setLoading(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setResetSent(true);
+  }
+
+  if (forgot) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 text-center">
+            <h1 className="text-xl font-semibold tracking-tight">Reset your password</h1>
+            <p className="mt-1 text-sm text-zinc-500">We&apos;ll email you a link to choose a new one.</p>
+          </div>
+          <form onSubmit={sendReset} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            {resetSent ? (
+              <Alert tone="success">
+                If <b>{email}</b> has an account, a reset link is on its way. Check your inbox (and spam).
+              </Alert>
+            ) : (
+              <>
+                <Field label="Email">
+                  <input type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
+                </Field>
+                {error && <Alert>{error}</Alert>}
+                <Button type="submit" loading={loading} className="w-full">Send reset link</Button>
+              </>
+            )}
+          </form>
+          <button
+            onClick={() => {
+              setForgot(false);
+              setResetSent(false);
+              setError("");
+            }}
+            className="mt-6 w-full text-center text-sm text-zinc-500 hover:text-zinc-900"
+          >
+            Back to log in
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -57,7 +112,14 @@ export default function LoginPage() {
               className={inputClass}
             />
           </Field>
-          <Field label="Password">
+          <Field
+            label="Password"
+            hint={
+              <button type="button" onClick={() => { setForgot(true); setError(""); }} className="hover:text-zinc-900 hover:underline">
+                Forgot password?
+              </button>
+            }
+          >
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}

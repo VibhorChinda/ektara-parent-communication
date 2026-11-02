@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+from datetime import datetime
 
 from twilio.base.exceptions import TwilioRestException
 from twilio.request_validator import RequestValidator
@@ -59,6 +60,22 @@ def fetch_whatsapp_status(message_sid: str) -> tuple[str, str]:
     if message.error_code:
         error = f"{message.error_code}: {message.error_message or 'WhatsApp could not deliver the message'}"
     return message.status, error
+
+
+def list_inbound_whatsapp(since: datetime) -> list[dict]:
+    """WhatsApp messages parents sent us since `since`, shaped like the inbound webhook params.
+
+    Used to recover replies whose webhook was lost (e.g. the server was asleep).
+    Twilio may filter by date only, so callers must skip messages already handled.
+    """
+    messages = _with_retry(lambda: client.messages.list(
+        to=settings.TWILIO_WHATSAPP_FROM, date_sent_after=since, limit=500,
+    ))
+    return [
+        {"MessageSid": m.sid, "From": m.from_ or "", "Body": m.body or ""}
+        for m in messages
+        if m.direction == "inbound"
+    ]
 
 
 def place_call(phone_e164: str, message_id: str) -> str:

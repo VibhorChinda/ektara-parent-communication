@@ -1,0 +1,35 @@
+# Free scheduler for the backend's cron tick (IVR fallback calls, resuming stuck
+# campaigns, recovering missed replies, template status sync).
+#
+# Setup: repo Settings -> Secrets and variables -> Actions -> add PUBLIC_BASE_URL
+# (e.g. https://parent-comm-api.onrender.com) and CRON_SECRET (same value as on Render).
+#
+# Daytime runs every 10 minutes also keep a free Render backend awake, so Twilio
+# callbacks are not lost while it sleeps. GitHub may delay scheduled runs by a few
+# minutes, and pauses schedules after 60 days without commits (re-enable in the Actions tab).
+name: Cron tick
+
+on:
+  schedule:
+    - cron: "*/10 2-14 * * *"    # every 10 min, about 07:30-20:30 IST
+    - cron: "0 15-23,0-1 * * *"  # hourly overnight
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /internal/cron/tick
+        env:
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$PUBLIC_BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Set the PUBLIC_BASE_URL and CRON_SECRET repository secrets to enable the cron tick."
+            exit 0
+          fi
+          # Retries give a sleeping free-plan server time to wake up. The tick is safe to repeat.
+          curl -fsS --retry 3 --retry-delay 30 --retry-all-errors --max-time 300 \
+            -X POST -H "X-Cron-Secret: $CRON_SECRET" \
+            "$PUBLIC_BASE_URL/internal/cron/tick"

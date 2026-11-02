@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     APP_TIMEZONE: str = "Asia/Kolkata"
     SEND_CONCURRENCY: int = 10
 
+    # Rough prices for the cost estimate shown before sending. 0 hides the estimate.
+    COST_PER_WHATSAPP: float = 0   # one template message
+    COST_PER_CALL: float = 0       # one fallback call (about a minute)
+    COST_CURRENCY: str = "INR"
+
     # A trailing slash would break Twilio signature validation.
     @field_validator("PUBLIC_BASE_URL", "WEB_ORIGIN")
     @classmethod

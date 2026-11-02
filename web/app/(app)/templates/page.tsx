@@ -27,6 +27,7 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [error, setError] = useState("");
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [tab, setTab] = useState<TemplateStatus | "all">("all");
   const [query, setQuery] = useState("");
 
@@ -48,6 +49,19 @@ export default function TemplatesPage() {
     const timer = setInterval(() => !document.hidden && load(), REFRESH_MS);
     return () => clearInterval(timer);
   }, [hasPending]);
+
+  // Ask Meta for decisions now instead of waiting for the next cron tick.
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const r = await api<{ checked: number; approved: number; rejected: number }>("/api/templates/sync", { method: "POST" });
+      toast(r.approved || r.rejected ? `${r.approved} approved, ${r.rejected} rejected` : "Still waiting for Meta");
+      load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    setSyncing(false);
+  }
 
   async function retry(id: string) {
     setRetryingId(id);
@@ -73,9 +87,16 @@ export default function TemplatesPage() {
         title="Templates"
         description="WhatsApp only delivers messages that Meta has approved. Review usually takes 5 minutes to 24 hours."
         actions={
-          <Link href="/templates/new" className={buttonClass("primary")}>
-            <Icon name="plus" /> Request template
-          </Link>
+          <>
+            {hasPending && (
+              <Button variant="secondary" onClick={syncNow} loading={syncing}>
+                {!syncing && <Icon name="refresh" />} Check status now
+              </Button>
+            )}
+            <Link href="/templates/new" className={buttonClass("primary")}>
+              <Icon name="plus" /> Request template
+            </Link>
+          </>
         }
       />
 
@@ -150,7 +171,7 @@ function TemplateFooter({ template: t, retrying, busy, onRetry }: { template: Te
   if (t.status === "pending_meta") {
     return (
       <p className="flex items-center gap-1.5 text-xs text-zinc-500">
-        <Icon name="clock" className="size-3.5" /> Waiting for Meta&apos;s review. This page updates on its own.
+        <Icon name="clock" className="size-3.5" /> Waiting for Meta&apos;s review. This page checks every 30 seconds.
       </p>
     );
   }

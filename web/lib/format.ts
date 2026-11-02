@@ -39,3 +39,23 @@ export function downloadCsv(filename: string, rows: (string | number | null | un
   link.click();
   URL.revokeObjectURL(url);
 }
+
+export function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${amount.toFixed(0)} ${currency}`; // unknown currency code
+  }
+}
+
+// "around 4:00 PM today", "around 9:00 AM tomorrow", "around 9:00 AM, 5 Nov"
+export function formatCallTime(iso: string): string {
+  const when = new Date(iso);
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  if (when.toDateString() === today.toDateString()) return `around ${time} today`;
+  if (when.toDateString() === tomorrow.toDateString()) return `around ${time} tomorrow`;
+  return `around ${time}, ${when.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}

@@ -6,7 +6,8 @@ from fastapi import APIRouter, Header, HTTPException
 from app.config import settings
 from app.routers.templates import sync_pending_templates
 from app.services.fallback import run_fallback
-from app.services.sender import recheck_stuck_messages
+from app.services.replies import recover_missed_replies
+from app.services.sender import recheck_stuck_messages, resume_stuck_campaigns
 
 log = logging.getLogger(__name__)
 
@@ -18,11 +19,14 @@ def tick(x_cron_secret: str = Header(default="")):
     if not hmac.compare_digest(x_cron_secret, settings.CRON_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # Run every job even if one of them fails. The re-check goes first so
-    # newly found failures get their fallback call in the same tick.
+    # Run every job even if one of them fails. Resends and re-checks go first so
+    # newly found failures get their fallback call in the same tick, and recovered
+    # replies come before the fallback so a parent who answered is not called.
     result = {}
     jobs = (
+        ("resume_campaigns", resume_stuck_campaigns),
         ("whatsapp_recheck", recheck_stuck_messages),
+        ("recover_replies", recover_missed_replies),
         ("fallback", run_fallback),
         ("templates", sync_pending_templates),
     )

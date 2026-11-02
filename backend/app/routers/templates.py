@@ -223,7 +223,30 @@ def sync_pending_templates() -> dict:
                 log.info("Template %s has WhatsApp status '%s'", template["name"], status)
             continue
 
-        update["updated_at"] = now_iso()
+        # decision_seen=false shows "Your template is ready" (or the reason) to the requester.
+        update |= {"decision_seen": False, "updated_at": now_iso()}
         supabase.table("templates").update(update).eq("id", template["id"]).eq("status", "pending_meta").execute()
 
     return {"checked": len(pending), "approved": approved, "rejected": rejected}
+
+
+@router.post("/sync")
+def sync_now(user: dict = Depends(get_current_user)):
+    """Ask Meta (via Twilio) for decisions right away, instead of waiting for the cron."""
+    return sync_pending_templates()
+
+
+@router.get("/notifications")
+def notifications(user: dict = Depends(get_current_user)):
+    """Meta's decisions on this user's templates that they have not seen yet."""
+    return (
+        supabase.table("templates").select("id, name, language, status, rejection_reason")
+        .eq("requested_by", user["id"]).eq("decision_seen", False)
+        .order("updated_at", desc=True).execute().data
+    )
+
+
+@router.post("/{template_id}/seen")
+def mark_seen(template_id: str, user: dict = Depends(get_current_user)):
+    supabase.table("templates").update({"decision_seen": True}).eq("id", template_id).execute()
+    return {"ok": True}

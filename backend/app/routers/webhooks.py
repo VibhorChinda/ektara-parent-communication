@@ -1,7 +1,6 @@
 """Twilio webhooks. Each one: validate the signature, log the payload, then apply
 changes in a way that is safe to repeat (Twilio retries)."""
 import logging
-from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape, quoteattr
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -9,16 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from app.config import settings
 from app.db import log_event, supabase
 from app.services import twilio_client
+from app.services.replies import handle_inbound
 from app.services.status import WHATSAPP_STATUS_MAP, apply_status, now_iso
 from app.voice_scripts import get_script
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 log = logging.getLogger(__name__)
 
-CONFIRM_WORDS = {"yes", "confirm", "1"}
-DECLINE_WORDS = {"no", "decline", "2", "can't attend", "cant attend"}
 CALL_ENDED = {"completed", "busy", "no-answer", "failed", "canceled"}
-REPLY_WINDOW = timedelta(days=7)
 
 
 async def twilio_params(request: Request) -> dict:
@@ -65,52 +62,10 @@ def whatsapp_status(message_id: str | None = None, params: dict = Depends(twilio
     return Response(status_code=204)
 
 
-def parse_reply(params: dict) -> str | None:
-    """Return 'confirmed', 'declined' or None (any other text)."""
-    button = params.get("ButtonPayload", "").strip().lower()
-    text = params.get("Body", "").strip().lower().rstrip(".!")
-    if button == "confirm" or text in CONFIRM_WORDS:
-        return "confirmed"
-    if button == "decline" or text in DECLINE_WORDS:
-        return "declined"
-    return None
-
-
-def find_replied_message(params: dict) -> str | None:
-    # Best match: the message the parent replied to (Twilio sends this for replies within 7 days).
-    replied_sid = params.get("OriginalRepliedMessageSid")
-    if replied_sid:
-        rows = supabase.table("messages").select("id").eq("wa_sid", replied_sid).execute().data
-        if rows:
-            return rows[0]["id"]
-
-    # Otherwise: the parent's most recent open message from the last 7 days.
-    phone = params.get("From", "").removeprefix("whatsapp:")
-    parents = supabase.table("parents").select("id").eq("phone_e164", phone).execute().data
-    if not parents:
-        return None
-    since = (datetime.now(timezone.utc) - REPLY_WINDOW).isoformat()
-    rows = (
-        supabase.table("messages").select("id")
-        .eq("parent_id", parents[0]["id"])
-        .in_("status", ["sent", "delivered", "read", "flagged"])
-        .gte("wa_sent_at", since)
-        .order("wa_sent_at", desc=True).limit(1).execute().data
-    )
-    return rows[0]["id"] if rows else None
-
-
 @router.post("/whatsapp/inbound")
 def whatsapp_inbound(params: dict = Depends(twilio_params)):
     event_id = log_event(None, "whatsapp_inbound", params)
-
-    message_id = find_replied_message(params)
-    if message_id:
-        supabase.table("message_events").update({"message_id": message_id}).eq("id", event_id).execute()
-        decision = parse_reply(params)
-        if decision:
-            apply_status(message_id, decision, {"confirmed_via": "whatsapp"})
-
+    handle_inbound(params, event_id)
     # Empty TwiML: never auto-reply with free text.
     return twiml("")
 

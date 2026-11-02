@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import campaigns, cron, parents, templates, webhooks
+from app.routers import campaigns, cron, info, messages, parents, templates, webhooks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -20,6 +20,8 @@ app.add_middleware(
 app.include_router(parents.router)
 app.include_router(templates.router)
 app.include_router(campaigns.router)
+app.include_router(messages.router)
+app.include_router(info.router)
 app.include_router(webhooks.router)
 app.include_router(cron.router)
 

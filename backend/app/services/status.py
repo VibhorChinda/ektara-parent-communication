@@ -2,7 +2,8 @@
 
 Ranking: queued < sent < delivered < read < confirmed/declined.
 failed (WhatsApp could not deliver) and flagged (no answer after the call) are
-side states: a later confirm/decline still wins over them.
+side states: a later confirm/decline still wins over them. cancelled (campaign
+stopped before this message was sent) is final.
 """
 from datetime import datetime, timezone
 
@@ -18,7 +19,11 @@ ALLOWED_FROM = {
     "confirmed": ["queued", "sent", "delivered", "read", "failed", "flagged"],
     "declined": ["queued", "sent", "delivered", "read", "failed", "flagged"],
     "flagged": ["queued", "sent", "delivered", "read", "failed"],
+    "cancelled": ["queued"],
 }
+
+# An admin who spoke to the parent may record or correct the outcome.
+ADMIN_OUTCOME_FROM = ["queued", "sent", "delivered", "read", "failed", "flagged", "confirmed", "declined"]
 
 # Twilio MessageStatus -> our status. Others (queued, accepted, sending) are ignored.
 WHATSAPP_STATUS_MAP = {
@@ -41,6 +46,18 @@ def apply_status(message_id: str, new_status: str, extra: dict | None = None) ->
         supabase.table("messages").update(update)
         .eq("id", message_id)
         .in_("status", ALLOWED_FROM[new_status])
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+def set_admin_outcome(message_id: str, outcome: str, user_id: str) -> bool:
+    """Record confirmed/declined after a personal call. Returns True if the row changed."""
+    update = {"status": outcome, "confirmed_via": "admin", "resolved_by": user_id, "updated_at": now_iso()}
+    result = (
+        supabase.table("messages").update(update)
+        .eq("id", message_id)
+        .in_("status", ADMIN_OUTCOME_FROM)
         .execute()
     )
     return len(result.data) > 0

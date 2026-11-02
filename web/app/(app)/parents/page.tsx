@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AudiencePicker from "@/components/AudiencePicker";
+import GroupActions from "@/components/GroupActions";
 import Icon from "@/components/Icon";
+import ParentDrawer from "@/components/ParentDrawer";
 import { useToast } from "@/components/Toast";
-import { Alert, Button, Card, EmptyState, PageHeader, SearchInput, SkeletonRows } from "@/components/ui";
+import { Alert, Button, Card, Chip, EmptyState, PageHeader, SearchInput, SkeletonRows } from "@/components/ui";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/format";
+import { audienceLabel, inAudience, levelName, type GroupLike } from "@/lib/groups";
 import { languageName } from "@/lib/templates";
-import type { Parent } from "@/lib/types";
+import type { Audience, Parent } from "@/lib/types";
 
 type UploadResult = {
   inserted: number;
@@ -16,11 +20,17 @@ type UploadResult = {
   errors: { row: number; phone: string | null; reason: string }[];
 };
 
-const COLUMNS = ["parent_name", "phone", "child_name", "class_name", "language", "has_whatsapp"];
+const COLUMNS = ["parent_name", "phone", "child_name", "institution", "institution_type", "class_or_year", "section", "language", "has_whatsapp"];
 const SAMPLE_ROWS = [
-  ["Asha Sharma", "9876543210", "Rohan Sharma", "7-B", "hi", "yes"],
-  ["John Mathew", "+91 98450 12345", "Anna Mathew", "7-B", "en", "no"],
+  ["Asha Sharma", "9876543210", "Rohan Sharma", "Sunrise Public School", "school", "7", "B", "hi", "yes"],
+  ["John Mathew", "+91 98450 12345", "Anna Mathew", "Sunrise Public School", "school", "7", "B", "en", "no"],
+  ["Meera Iyer", "9840012345", "Karthik Iyer", "City Engineering College", "college", "2", "", "ta", "yes"],
 ];
+
+// Answered nothing in 2+ campaigns: worth a personal call.
+function hardToReach(p: Parent): boolean {
+  return p.stats.total >= 2 && p.stats.responded === 0;
+}
 
 export default function ParentsPage() {
   const toast = useToast();
@@ -31,8 +41,10 @@ export default function ParentsPage() {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState("");
-  const [classFilter, setClassFilter] = useState("");
+  const [audience, setAudience] = useState<Audience | null>(null);
+  const [onlyHardToReach, setOnlyHardToReach] = useState(false);
   const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState<string | null>(null);
 
   function loadParents() {
     api<Parent[]>("/api/parents")
@@ -71,19 +83,25 @@ export default function ParentsPage() {
     setUploading(false);
   }
 
-  const classes = Array.from(new Set((parents ?? []).map((p) => p.class_name))).sort();
+  const all = parents ?? [];
+  const groups: GroupLike[] = all.map((p) => ({ ...p, count: 1 }));
+  const institutions = Array.from(new Set(all.map((p) => p.institution))).sort();
   const q = query.trim().toLowerCase();
-  const shown = (parents ?? []).filter(
+  const inGroup = all.filter((p) => inAudience(p, audience));
+  const shown = inGroup.filter(
     (p) =>
-      (!classFilter || p.class_name === classFilter) &&
+      (!onlyHardToReach || hardToReach(p)) &&
       (!q || [p.parent_name, p.child_name ?? "", p.phone_e164].some((v) => v.toLowerCase().includes(q))),
   );
+  const hardCount = inGroup.filter(hardToReach).length;
+  const audienceType = all.find((p) => p.institution === audience?.institution)?.institution_type ?? "school";
+  const openParent = all.find((p) => p.id === openId) ?? null;
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Parents"
-        description="Upload your class lists. Parents with the same phone number are updated, not duplicated."
+        description="Upload your lists. Parents with the same phone number are updated, not duplicated."
         actions={
           <Button variant="secondary" onClick={() => downloadCsv("parents-sample.csv", [COLUMNS, ...SAMPLE_ROWS])}>
             <Icon name="download" /> Sample CSV
@@ -127,8 +145,9 @@ export default function ParentsPage() {
           ) : (
             <>
               <span className="font-medium">Drop a CSV here, or click to choose</span>
-              <span className="mt-1 text-xs text-zinc-500">
-                Columns: <code className="font-mono">{COLUMNS.join(", ")}</code>
+              <span className="mt-1 max-w-xl text-xs text-zinc-500">
+                Columns: <code className="font-mono">{COLUMNS.join(", ")}</code>. Use institution_type <code>school</code> (class + section)
+                or <code>college</code> (year 1–4, no section).
               </span>
             </>
           )}
@@ -156,23 +175,31 @@ export default function ParentsPage() {
         {loadError && <Alert>{loadError}</Alert>}
         {!loadError && parents === null && <SkeletonRows />}
         {parents?.length === 0 && (
-          <EmptyState icon="users" title="No parents yet" description="Upload a CSV above to add your first class." />
+          <EmptyState icon="users" title="No parents yet" description="Upload a CSV above to add your first school or college." />
         )}
 
         {parents && parents.length > 0 && (
           <>
-            <div className="flex flex-wrap gap-1.5">
-              <ClassChip active={!classFilter} onClick={() => setClassFilter("")} label="All classes" count={parents.length} />
-              {classes.map((c) => (
-                <ClassChip
-                  key={c}
-                  active={classFilter === c}
-                  onClick={() => setClassFilter(c)}
-                  label={c}
-                  count={parents.filter((p) => p.class_name === c).length}
-                />
-              ))}
-            </div>
+            <Card className="space-y-4 p-4">
+              <AudiencePicker groups={groups} value={audience} onChange={setAudience} allowAll />
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3">
+                <Chip active={onlyHardToReach} onClick={() => setOnlyHardToReach(!onlyHardToReach)} count={hardCount}>
+                  Hard to reach
+                </Chip>
+                {audience && (
+                  <GroupActions
+                    key={audienceLabel(audience, audienceType)}
+                    audience={audience}
+                    type={audienceType}
+                    count={inGroup.length}
+                    onDone={() => {
+                      setAudience(null);
+                      loadParents();
+                    }}
+                  />
+                )}
+              </div>
+            </Card>
 
             {shown.length === 0 ? (
               <p className="py-10 text-center text-sm text-zinc-500">No parents match.</p>
@@ -182,21 +209,26 @@ export default function ParentsPage() {
                   <thead className="border-b border-zinc-100 text-left text-xs uppercase tracking-wide text-zinc-400">
                     <tr>
                       <th className="px-4 py-3 font-medium">Parent</th>
-                      <th className="px-4 py-3 font-medium">Class</th>
+                      <th className="px-4 py-3 font-medium">Group</th>
                       <th className="px-4 py-3 font-medium">Phone</th>
                       <th className="px-4 py-3 font-medium">Language</th>
                       <th className="px-4 py-3 font-medium">Reached by</th>
+                      <th className="px-4 py-3 font-medium">Answered</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
                     {shown.map((p) => (
-                      <tr key={p.id} className={p.opted_out ? "text-zinc-400" : ""}>
+                      <tr key={p.id} onClick={() => setOpenId(p.id)} className={`cursor-pointer hover:bg-zinc-50 ${p.opted_out ? "text-zinc-400" : ""}`}>
                         <td className="px-4 py-3">
                           <p className="font-medium">{p.parent_name}</p>
                           {p.child_name && <p className="text-xs text-zinc-500">Parent of {p.child_name}</p>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">{p.class_name}</span>
+                          <p className="text-xs text-zinc-500">{p.institution}</p>
+                          <p className="text-xs font-medium text-zinc-700">
+                            {levelName(p.institution_type)} {p.class_or_year}
+                            {p.section && ` · ${p.section}`}
+                          </p>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">{p.phone_e164}</td>
                         <td className="px-4 py-3 text-zinc-600">{languageName(p.language)}</td>
@@ -209,6 +241,15 @@ export default function ParentsPage() {
                             <span className="flex items-center gap-1 text-xs text-zinc-600"><Icon name="phone" className="size-3.5" /> Call only</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-xs">
+                          {p.stats.total === 0 ? (
+                            <span className="text-zinc-400">No messages yet</span>
+                          ) : (
+                            <span className={hardToReach(p) ? "font-medium text-red-600" : "text-zinc-600"}>
+                              {p.stats.responded} of {p.stats.total}
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -218,6 +259,17 @@ export default function ParentsPage() {
           </>
         )}
       </section>
+
+      <ParentDrawer
+        parent={openParent}
+        institutions={institutions}
+        onClose={() => setOpenId(null)}
+        onSaved={(updated) => setParents((list) => (list ?? []).map((p) => (p.id === updated.id ? updated : p)))}
+        onDeleted={(id) => {
+          setOpenId(null);
+          setParents((list) => (list ?? []).filter((p) => p.id !== id));
+        }}
+      />
     </div>
   );
 }
@@ -264,18 +316,5 @@ function UploadReport({ result }: { result: UploadResult }) {
         </div>
       )}
     </Card>
-  );
-}
-
-function ClassChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-        active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300"
-      }`}
-    >
-      {label} <span className={active ? "text-zinc-300" : "text-zinc-400"}>{count}</span>
-    </button>
   );
 }
