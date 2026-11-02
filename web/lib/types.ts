@@ -34,6 +34,8 @@ export type Message = {
   call_status: string | null;
   call_digit: string | null;
   confirmed_via: "whatsapp" | "voice" | null;
+  wa_sent_at: string | null;
+  updated_at: string;
   parents: {
     parent_name: string;
     child_name: string | null;
@@ -44,7 +46,20 @@ export type Message = {
 
 export type CampaignDetail = Campaign & {
   template_body: string;
+  template_has_buttons: boolean;
   messages: Message[];
 };
 
 export type ClassInfo = { class_name: string; parent_count: number };
+
+export type Parent = {
+  id: string;
+  parent_name: string;
+  phone_e164: string;
+  child_name: string | null;
+  class_name: string;
+  language: string;
+  has_whatsapp: boolean;
+  opted_out: boolean;
+  created_at: string;
+};

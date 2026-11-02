@@ -93,7 +93,7 @@ def list_campaigns(user: dict = Depends(get_current_user)):
 
 @router.get("/{campaign_id}")
 def get_campaign(campaign_id: str, status: str | None = None, user: dict = Depends(get_current_user)):
-    rows = supabase.table("campaigns").select("*, templates(name, body)").eq("id", campaign_id).execute().data
+    rows = supabase.table("campaigns").select("*, templates(name, body, has_confirm_buttons)").eq("id", campaign_id).execute().data
     if not rows:
         raise HTTPException(status_code=404, detail="Campaign not found")
     campaign = rows[0]
@@ -111,6 +111,7 @@ def get_campaign(campaign_id: str, status: str | None = None, user: dict = Depen
         **campaign,
         "template_name": campaign["templates"]["name"],
         "template_body": campaign["templates"]["body"],
+        "template_has_buttons": campaign["templates"]["has_confirm_buttons"],
         "counts": counts,
         "messages": messages,
     }

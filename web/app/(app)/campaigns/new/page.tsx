@@ -1,13 +1,27 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import Icon from "@/components/Icon";
+import WhatsAppPreview from "@/components/WhatsAppPreview";
+import { Alert, Button, buttonClass, Card, EmptyState, Field, inputClass, Modal, PageHeader, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
-import { fillTemplate, placeholderNumbers } from "@/lib/templates";
+import { languageName, placeholderNumbers } from "@/lib/templates";
 import type { ClassInfo, Template } from "@/lib/types";
 
+// useSearchParams needs a Suspense boundary in Next.js.
 export default function NewCampaignPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <CampaignForm />
+    </Suspense>
+  );
+}
+
+function CampaignForm() {
   const router = useRouter();
+  const preselected = useSearchParams().get("template"); // from "Use in campaign" on the templates page
   const [classes, setClasses] = useState<ClassInfo[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -15,6 +29,7 @@ export default function NewCampaignPage() {
   const [className, setClassName] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
+  const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
@@ -27,15 +42,54 @@ export default function NewCampaignPage() {
       .then(([c, t]) => {
         setClasses(c);
         setTemplates(t);
+        if (preselected && t.some((x) => x.id === preselected)) setTemplateId(preselected);
       })
       .catch((e) => setLoadError(e.message));
-  }, []);
+  }, [preselected]);
 
-  const template = templates?.find((t) => t.id === templateId);
-  const selectedClass = classes?.find((c) => c.class_name === className);
+  if (loadError) return <Alert>{loadError}</Alert>;
+  if (!classes || !templates) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  if (classes.length === 0 || templates.length === 0) {
+    return (
+      <div>
+        <PageHeader title="New campaign" />
+        {classes.length === 0 ? (
+          <EmptyState
+            icon="users"
+            title="No parents yet"
+            description="Upload a CSV of parents first, then come back to send a campaign."
+            action={<Link href="/parents" className={buttonClass("primary")}>Upload parents</Link>}
+          />
+        ) : (
+          <EmptyState
+            icon="doc"
+            title="No approved templates yet"
+            description="WhatsApp only allows messages that Meta has approved. Request a template and wait for approval."
+            action={<Link href="/templates/new" className={buttonClass("primary")}>Request a template</Link>}
+          />
+        )}
+      </div>
+    );
+  }
+
+  const template = templates.find((t) => t.id === templateId);
+  const selectedClass = classes.find((c) => c.class_name === className);
   const numbers = template ? placeholderNumbers(template.body) : [];
-  const allFilled = numbers.every((n) => values[String(n)]?.trim());
-  const canSend = !!template && !!selectedClass && allFilled && !sending;
+  const missing = numbers.filter((n) => !values[String(n)]?.trim());
+
+  let blocker = "";
+  if (!selectedClass) blocker = "Choose a class";
+  else if (!template) blocker = "Choose a template";
+  else if (missing.length > 0) blocker = `Fill in ${missing.length === 1 ? "1 detail" : `${missing.length} details`}`;
 
   function chooseTemplate(id: string) {
     setTemplateId(id);
@@ -43,12 +97,7 @@ export default function NewCampaignPage() {
   }
 
   async function send() {
-    if (!template || !selectedClass) return;
-    const ok = window.confirm(
-      `Send to ${selectedClass.parent_count} parents in class ${selectedClass.class_name}?`,
-    );
-    if (!ok) return;
-
+    if (!template || !selectedClass || sending) return;
     setSending(true);
     setError("");
     try {
@@ -60,89 +109,139 @@ export default function NewCampaignPage() {
     } catch (e) {
       setError((e as Error).message);
       setSending(false);
+      setConfirming(false);
     }
     // On success sending stays true so the button can't be pressed again.
   }
 
-  if (loadError) return <p className="text-red-600">{loadError}</p>;
-  if (!classes || !templates) return <p className="text-gray-500">Loading...</p>;
-
   return (
-    <div className="max-w-2xl space-y-5">
-      <h1 className="text-2xl font-semibold">New campaign</h1>
+    <div>
+      <PageHeader title="New campaign" description="Send an approved WhatsApp message to every parent in a class." />
 
-      {classes.length === 0 && <p className="text-gray-600">No parents yet. Upload parents first.</p>}
-      {templates.length === 0 && (
-        <p className="text-gray-600">No approved templates yet. Request one on the Templates page.</p>
-      )}
-
-      <label className="block">
-        <span className="text-sm font-medium">Class</span>
-        <select
-          value={className}
-          onChange={(e) => setClassName(e.target.value)}
-          className="mt-1 w-full rounded border bg-white px-3 py-2"
-        >
-          <option value="">Choose a class</option>
-          {classes.map((c) => (
-            <option key={c.class_name} value={c.class_name}>
-              {c.class_name} ({c.parent_count} parents)
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="block">
-        <span className="text-sm font-medium">Template</span>
-        <select
-          value={templateId}
-          onChange={(e) => chooseTemplate(e.target.value)}
-          className="mt-1 w-full rounded border bg-white px-3 py-2"
-        >
-          <option value="">Choose an approved template</option>
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} ({t.language})
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {template &&
-        numbers.map((n) => (
-          <label key={n} className="block">
-            <span className="text-sm font-medium">{template.variable_names[n - 1] || `Value ${n}`}</span>
-            <input
-              value={values[String(n)] ?? ""}
-              onChange={(e) => setValues({ ...values, [String(n)]: e.target.value })}
-              placeholder={template.sample_values[String(n)]}
-              className="mt-1 w-full rounded border px-3 py-2"
-            />
-          </label>
-        ))}
-
-      {template && (
-        <div className="rounded border bg-white p-4">
-          <p className="mb-2 text-xs uppercase text-gray-500">Preview</p>
-          <p className="whitespace-pre-wrap">{fillTemplate(template.body, values, template.variable_names)}</p>
-          {template.has_confirm_buttons && (
-            <div className="mt-3 flex gap-2">
-              <span className="rounded border px-3 py-1 text-sm text-blue-600">Confirm</span>
-              <span className="rounded border px-3 py-1 text-sm text-blue-600">Can&apos;t attend</span>
+      <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-8">
+          <Step number={1} title="Who should get it?" done={!!selectedClass}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {classes.map((c) => (
+                <OptionCard key={c.class_name} selected={className === c.class_name} onClick={() => setClassName(c.class_name)}>
+                  <span className="block font-semibold">{c.class_name}</span>
+                  <span className="text-xs text-zinc-500">{c.parent_count} parents</span>
+                </OptionCard>
+              ))}
             </div>
-          )}
+          </Step>
+
+          <Step number={2} title="Which message?" done={!!template}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {templates.map((t) => (
+                <OptionCard key={t.id} selected={templateId === t.id} onClick={() => chooseTemplate(t.id)}>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">{t.name}</span>
+                    <span className="shrink-0 text-xs text-zinc-400">{languageName(t.language)}</span>
+                  </span>
+                  <span className="mt-1 line-clamp-2 text-xs text-zinc-500">{t.body}</span>
+                </OptionCard>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-zinc-400">
+              Only Meta-approved templates are listed. <Link href="/templates/new" className="underline">Request a new one</Link>
+            </p>
+          </Step>
+
+          <Step number={3} title="Fill in the details" done={!!template && missing.length === 0}>
+            {!template ? (
+              <p className="text-sm text-zinc-400">Choose a template first.</p>
+            ) : numbers.length === 0 ? (
+              <p className="text-sm text-zinc-500">This template has nothing to fill in.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {numbers.map((n) => (
+                  <Field key={n} label={template.variable_names[n - 1] || `Value ${n}`}>
+                    <input
+                      value={values[String(n)] ?? ""}
+                      onChange={(e) => setValues({ ...values, [String(n)]: e.target.value })}
+                      placeholder={`e.g. ${template.sample_values[String(n)] ?? ""}`}
+                      className={inputClass}
+                    />
+                  </Field>
+                ))}
+              </div>
+            )}
+          </Step>
         </div>
-      )}
 
-      {error && <p className="text-red-600">{error}</p>}
+        <div className="lg:sticky lg:top-6 lg:h-fit">
+          <Card className="p-4">
+            <p className="mb-3 text-sm font-medium text-zinc-500">Preview</p>
+            <WhatsAppPreview
+              body={template?.body ?? ""}
+              values={values}
+              labels={template?.variable_names}
+              hasButtons={template?.has_confirm_buttons ?? false}
+            />
+            <dl className="mt-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-zinc-500">Recipients</dt>
+                <dd className="font-medium">{selectedClass ? `${selectedClass.parent_count} parents in ${selectedClass.class_name}` : "—"}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-zinc-500">No reply?</dt>
+                <dd className="text-right">Automatic phone call later</dd>
+              </div>
+            </dl>
+            {error && <div className="mt-4"><Alert>{error}</Alert></div>}
+            <Button onClick={() => setConfirming(true)} disabled={!!blocker || sending} className="mt-4 w-full">
+              <Icon name="send" /> {blocker || "Review and send"}
+            </Button>
+          </Card>
+        </div>
+      </div>
 
-      <button
-        onClick={send}
-        disabled={!canSend}
-        className="rounded bg-blue-600 px-5 py-2 text-white disabled:opacity-50"
+      <Modal
+        open={confirming}
+        title={`Send to ${selectedClass?.parent_count ?? 0} parents in class ${className}?`}
+        onClose={() => !sending && setConfirming(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirming(false)} disabled={sending}>Cancel</Button>
+            <Button onClick={send} loading={sending}>{sending ? "Sending..." : "Send now"}</Button>
+          </>
+        }
       >
-        {sending ? "Sending..." : "Send"}
-      </button>
+        <p className="mb-3">Every parent gets this on WhatsApp. This can&apos;t be undone.</p>
+        {template && (
+          <WhatsAppPreview body={template.body} values={values} labels={template.variable_names} hasButtons={template.has_confirm_buttons} />
+        )}
+      </Modal>
     </div>
+  );
+}
+
+function Step({ number, title, done, children }: { number: number; title: string; done: boolean; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2.5 font-medium">
+        <span className={`flex size-6 items-center justify-center rounded-full text-xs font-semibold ${done ? "bg-emerald-500 text-white" : "bg-zinc-200 text-zinc-600"}`}>
+          {done ? <Icon name="check" className="size-3.5" /> : number}
+        </span>
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function OptionCard({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`rounded-xl border bg-white p-3 text-left text-sm shadow-sm transition hover:border-zinc-300 ${
+        selected ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

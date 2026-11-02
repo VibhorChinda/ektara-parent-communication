@@ -1,29 +1,38 @@
 const STYLES: Record<string, string> = {
   // message statuses
-  queued: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-800",
-  delivered: "bg-indigo-100 text-indigo-800",
-  read: "bg-purple-100 text-purple-800",
-  confirmed: "bg-green-100 text-green-800",
-  declined: "bg-orange-100 text-orange-800",
-  flagged: "bg-red-100 text-red-800",
-  failed: "bg-red-200 text-red-900",
+  queued: "bg-zinc-100 text-zinc-600",
+  sent: "bg-sky-50 text-sky-700",
+  delivered: "bg-sky-50 text-sky-700",
+  read: "bg-indigo-50 text-indigo-700",
+  confirmed: "bg-emerald-50 text-emerald-700",
+  declined: "bg-amber-50 text-amber-800",
+  flagged: "bg-red-50 text-red-700",
+  failed: "bg-zinc-100 text-zinc-700",
   // template statuses
-  draft: "bg-gray-100 text-gray-700",
-  pending_meta: "bg-yellow-100 text-yellow-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
+  draft: "bg-zinc-100 text-zinc-600",
+  pending_meta: "bg-amber-50 text-amber-800",
+  approved: "bg-emerald-50 text-emerald-700",
+  rejected: "bg-red-50 text-red-700",
+  // campaign statuses
+  sending: "bg-sky-50 text-sky-700",
 };
 
 const LABELS: Record<string, string> = {
   pending_meta: "Pending Meta",
+  flagged: "Needs follow-up",
 };
 
+export function statusLabel(status: string): string {
+  return LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 export default function StatusBadge({ status }: { status: string }) {
-  const label = LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1);
   return (
-    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${STYLES[status] ?? "bg-gray-100"}`}>
-      {label}
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STYLES[status] ?? "bg-zinc-100 text-zinc-600"}`}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {statusLabel(status)}
     </span>
   );
 }
