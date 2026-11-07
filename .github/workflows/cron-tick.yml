@@ -2,7 +2,7 @@
 # campaigns, recovering missed replies, template status sync).
 #
 # Setup: repo Settings -> Secrets and variables -> Actions -> add PUBLIC_BASE_URL
-# (e.g. https://parent-comm-api.onrender.com) and CRON_SECRET (same value as on Render).
+# (your backend URL, e.g. https://parent-comm-api.vercel.app) and CRON_SECRET (same value as on the backend).
 #
 # Daytime runs every 10 minutes also keep a free Render backend awake, so Twilio
 # callbacks are not lost while it sleeps. GitHub may delay scheduled runs by a few

@@ -76,8 +76,8 @@ def content_sids(template_ids: set[str]) -> dict[str, str]:
 
 
 def send_campaign(campaign_id: str) -> None:
-    """Send every queued message of a campaign. Runs as a background task, and again from the
-    cron if the server died mid-send; claim_send makes a second run harmless."""
+    """Send every queued message of a campaign. Runs inside the request, and again from the
+    cron if the send died partway; claim_send makes a second run harmless."""
     try:
         campaign = supabase.table("campaigns").select("id, status, template_id, variables").eq("id", campaign_id).execute().data[0]
         if campaign["status"] == "cancelled":
@@ -103,7 +103,7 @@ def send_campaign(campaign_id: str) -> None:
 
 
 def resume_stuck_campaigns() -> dict:
-    """Cron job: finish campaigns whose background send died (server restart or sleep)."""
+    """Cron job: finish campaigns whose send died partway (timeout or server restart)."""
     now = datetime.now(timezone.utc)
     campaigns = (
         supabase.table("campaigns").select("id")
