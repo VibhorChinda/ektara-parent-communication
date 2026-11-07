@@ -10,7 +10,7 @@ for personal follow-up.
 - `web/`: Next.js admin app
 - `supabase/migrations/`: database schema
 - `render.yaml`: Render blueprint (backend, web app, optional paid cron job)
-- `backend/index.py`: entry point for deploying the backend on Vercel
+- `vercel.json`, `backend/index.py`: Vercel deployment (one project, backend and web app as services)
 - `.github/workflows/cron-tick.yml`: free scheduler that calls the cron tick
 
 There are no user roles. Every user who can log in has full access.
@@ -112,29 +112,39 @@ Open http://localhost:3000 and log in with a user from step 1.
 
 ## Deploy to Vercel (free)
 
-Both parts run on Vercel's free Hobby plan as two projects from this repo. The backend runs as a
-serverless function: it starts in a few seconds on the first request instead of sleeping like a
-free Render service, so Twilio callbacks are not lost. Campaigns are sent inside the "Send" request,
-so the Send button waits a few seconds for a large class. Vercel Hobby is for non-commercial use.
+The whole app deploys as **one** Vercel project with two services (Vercel Services, in beta),
+defined in `vercel.json`. Both share one domain: `/api/*`, `/webhooks/*`, `/internal/*` and `/health`
+go to the FastAPI backend, everything else to the Next.js app. The browser calls the backend on the
+same domain, so there is no CORS setup. The backend runs as a serverless function: it starts in a
+few seconds on the first request instead of sleeping like a free Render service, so Twilio callbacks
+are not lost. Campaigns are sent inside the "Send" request, so the Send button waits a few seconds
+for a large class. The Hobby plan is free and meant for non-commercial use.
 
 1. Push this repo to GitHub.
-2. **Backend project.** In Vercel: **Add New → Project**, import the repo, set **Root Directory** to
-   `backend`. Vercel finds the FastAPI app through `backend/index.py` and installs
-   `requirements.txt`. Add every backend environment variable from the table below. Leave
-   `PUBLIC_BASE_URL` and `WEB_ORIGIN` for now. Deploy.
-3. Copy the backend's production URL (e.g. `https://parent-comm-api.vercel.app`). Set
-   `PUBLIC_BASE_URL` to it (no trailing slash) and redeploy. Use the production domain, not a
-   per-deployment preview URL, or Twilio signature checks fail with 403.
-4. **Web project.** **Add New → Project** again with the same repo, **Root Directory** `web`. Set
-   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `NEXT_PUBLIC_API_BASE_URL` (the
-   backend URL). Deploy.
-5. In the backend project, set `WEB_ORIGIN` to the web app's production URL and redeploy.
-6. In Supabase: **Authentication → URL Configuration**, set **Site URL** to the web app URL.
-7. **Scheduler.** Vercel's free cron runs only once a day, so use GitHub Actions: in the GitHub repo,
-   **Settings → Secrets and variables → Actions**, add `PUBLIC_BASE_URL` (the backend URL) and
+2. In Vercel: **Add New → Project**, import the repo, keep the **Root Directory** as the repo root.
+   Vercel reads `vercel.json`. It finds the FastAPI app through `backend/index.py` and installs
+   `backend/requirements.txt`.
+3. Add the environment variables (both services share them):
+   - every backend variable from the table below, except leave `PUBLIC_BASE_URL` and `WEB_ORIGIN`
+     until you know the domain;
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Do **not** set
+     `NEXT_PUBLIC_API_BASE_URL`: left unset, the web app calls the backend on its own domain.
+
+   Deploy.
+4. Copy the project's production domain (e.g. `https://parent-comm.vercel.app`). Set both
+   `PUBLIC_BASE_URL` and `WEB_ORIGIN` to it (no trailing slash) and redeploy. Use the production
+   domain, not a per-deployment preview URL, or Twilio signature checks fail with 403.
+5. In Supabase: **Authentication → URL Configuration**, set **Site URL** to the same domain.
+6. **Scheduler.** Vercel's free cron runs only once a day, so use GitHub Actions: in the GitHub repo,
+   **Settings → Secrets and variables → Actions**, add `PUBLIC_BASE_URL` (the domain) and
    `CRON_SECRET` (same value as in Vercel). `.github/workflows/cron-tick.yml` then calls the tick.
-8. Do steps 6–8 of the Render section below (health check, Twilio inbound URL, first tick), using the
-   Vercel backend URL.
+   `/internal/cron/tick` is public so GitHub can reach it; the `X-Cron-Secret` header protects it.
+7. Do steps 6–8 of the Render section below (health check, Twilio inbound URL, first tick), using the
+   Vercel domain.
+
+To run both services together locally the same way, use `vercel dev` from the repo root (with the
+Vercel CLI). Plain `uvicorn` + `npm run dev` with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`
+still works too.
 
 If a campaign send runs past Vercel's function time limit, the cron tick finishes the rest; no
 parent gets the message twice.
@@ -198,7 +208,7 @@ parent gets the message twice.
 | Variable | Purpose |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Login (public values, safe in the browser) |
-| `NEXT_PUBLIC_API_BASE_URL` | Backend URL, e.g. `http://localhost:8000` |
+| `NEXT_PUBLIC_API_BASE_URL` | Backend URL, e.g. `http://localhost:8000`. Leave unset on Vercel (same domain) |
 
 ## Manual test checklist
 

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "parent-comm-api": {
+      "root": "backend",
+      "framework": "fastapi"
+    },
+    "parent-comm-web": {
+      "root": "web",
+      "framework": "nextjs"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "parent-comm-api" } },
+    { "source": "/webhooks/(.*)", "destination": { "service": "parent-comm-api" } },
+    { "source": "/internal/(.*)", "destination": { "service": "parent-comm-api" } },
+    { "source": "/health", "destination": { "service": "parent-comm-api" } },
+    { "source": "/(.*)", "destination": { "service": "parent-comm-web" } }
+  ]
+}
