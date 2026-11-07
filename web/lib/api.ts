@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+// Empty means same domain (Vercel serves the backend under /api on the web app's domain).
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export class ApiError extends Error {
   errors: string[];

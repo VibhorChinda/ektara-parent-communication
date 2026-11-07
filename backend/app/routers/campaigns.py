@@ -1,6 +1,6 @@
 from collections import Counter
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.auth import get_current_user
@@ -80,7 +80,7 @@ def get_campaign_row(campaign_id: str) -> dict:
 
 
 @router.post("")
-def create_campaign(body: CampaignCreate, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+def create_campaign(body: CampaignCreate, user: dict = Depends(get_current_user)):
     rows = supabase.table("templates").select("*").eq("id", body.template_id).execute().data
     if not rows:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -136,7 +136,8 @@ def create_campaign(body: CampaignCreate, background_tasks: BackgroundTasks, use
     for i in range(0, len(messages), CHUNK_SIZE):
         supabase.table("messages").insert(messages[i : i + CHUNK_SIZE]).execute()
 
-    background_tasks.add_task(send_campaign, campaign["id"])
+    # Send inside the request: on serverless hosts (Vercel) work after the response may never run.
+    send_campaign(campaign["id"])
     return {"id": campaign["id"], "message_count": len(messages)}
 
 
@@ -236,7 +237,7 @@ def cancel_campaign(campaign_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{campaign_id}/retry-failed")
-def retry_failed(campaign_id: str, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+def retry_failed(campaign_id: str, user: dict = Depends(get_current_user)):
     """Send WhatsApp again to parents whose message failed and who have not been called yet."""
     campaign = get_campaign_row(campaign_id)
     if campaign["status"] == "cancelled":
@@ -256,5 +257,5 @@ def retry_failed(campaign_id: str, background_tasks: BackgroundTasks, user: dict
     )
     if retried:
         supabase.table("campaigns").update({"status": "sending"}).eq("id", campaign_id).execute()
-        background_tasks.add_task(send_campaign, campaign_id)
+        send_campaign(campaign_id)
     return {"retried": len(retried)}
