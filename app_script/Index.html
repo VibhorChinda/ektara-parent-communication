@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ek Tara Communications</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Hanken+Grotesk:wght@400..700&display=swap" rel="stylesheet">
+<meta name="color-scheme" content="light dark">
+<script>
+  // If anything stops the app from starting, say so on screen instead of leaving a blank page.
+  (function () {
+    var shown = false;
+    function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+    function show(msg) {
+      if (shown) return; shown = true;
+      var d = document.createElement('div'); d.id = 'bootfail'; d.setAttribute('role', 'alert');
+      d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:#7f1d1d;color:#fff;padding:14px 16px;border-radius:10px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)';
+      d.innerHTML = '<b>The app hit a problem while starting.</b><br>' + esc(msg) + '<br><span style="opacity:.85">Try Ctrl+Shift+R. If it continues, add <b>?diag=1</b> to the end of this page\u2019s address, open it, and send what it shows to the project owner.</span>';
+      (document.body || document.documentElement).appendChild(d);
+    }
+    window.__bootFail = show;
+    window.addEventListener('error', function (e) { show((e.message || 'Script error') + (e.filename ? ' (' + String(e.filename).split('/').pop() + ':' + e.lineno + ')' : '')); });
+    window.addEventListener('unhandledrejection', function (e) { show((e.reason && e.reason.message) || e.reason); });
+  })();
+</script>
+<script>
+  (function () {
+    var m = 'auto'; try { m = localStorage.getItem('ektara-theme') || 'auto'; } catch (e) {}
+    var dark = m === 'dark' || (m === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.mode = m;
+  })();
+</script>
+<style>
+:root {
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", "Noto Sans Tamil", sans-serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", "Noto Sans Tamil", sans-serif;
+  --bg:#eef1ee; --bg-2:#e2e8e4; --card:#ffffff; --text:#12201d; --text-2:#3b4a46; --muted:#5b6a65; --line:#d8dfdb; --line-2:#c3cdc8;
+  --brand:#0e5e55; --ok:#0f7a4d; --warn:#9a5b00; --bad:#b42318; --info:#1b5fa8; --violet:#5b4fc7;
+  --parent:#0e5e55; --donor:#9b2f5e; --overview:#7a5a06;
+  --acc:var(--brand); --acc-ink:#ffffff;
+  --r-s:7px; --r-m:12px; --r-l:18px;
+  --sh-1:0 1px 2px rgba(18,32,29,.05);
+  --sh-2:0 18px 44px -14px rgba(18,32,29,.32), 0 3px 10px rgba(18,32,29,.08);
+  --ease:cubic-bezier(.2,.8,.2,1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg:#0c1412; --bg-2:#16211e; --card:#131c19; --text:#e8f0ed; --text-2:#c3d0cb; --muted:#93a39d; --line:#25332f; --line-2:#34453f;
+  --brand:#52c1b0; --ok:#4cc38a; --warn:#e3a93f; --bad:#f28b82; --info:#6db0f0; --violet:#a79bff;
+  --parent:#52c1b0; --donor:#f08db5; --overview:#e2b84d; --acc-ink:#07130f;
+  --sh-1:0 1px 2px rgba(0,0,0,.45);
+  --sh-2:0 22px 52px -14px rgba(0,0,0,.75), 0 3px 10px rgba(0,0,0,.45);
+  color-scheme: dark;
+}
+html[data-div="parent"] { --acc:var(--parent); }
+html[data-div="donor"] { --acc:var(--donor); }
+html[data-div="overview"] { --acc:var(--overview); }
+
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html { scroll-behavior:smooth; }
+body { margin:0; min-height:100vh; display:flex; flex-direction:column; font:15px/1.5 var(--font-body); color:var(--text); background:var(--bg); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+body.noscroll { overflow:hidden; }
+h1, h2, h3 { font-family:var(--font-display); font-weight:650; letter-spacing:-.015em; margin:0; text-wrap:balance; }
+h1 { font-size:30px; line-height:1.15; letter-spacing:-.025em; margin-bottom:4px; }
+h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:16px; }
+p { text-wrap:pretty; }
+a { color:var(--acc); text-underline-offset:3px; }
+::selection { background:color-mix(in srgb, var(--acc) 28%, transparent); }
+:focus-visible { outline:3px solid color-mix(in srgb, var(--acc) 60%, transparent); outline-offset:2px; border-radius:4px; }
+.sub { color:var(--muted); margin:0 0 18px; } .muted { color:var(--muted); } .small { font-size:12.5px; }
+ul { padding-left:20px; }
+pre { background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:var(--r-s); overflow:auto; font-size:12.5px; }
+
+.skip { position:fixed; left:12px; top:-60px; z-index:100; background:var(--acc); color:var(--acc-ink); padding:9px 14px; border-radius:var(--r-s); text-decoration:none; font-weight:600; transition:top .15s; }
+.skip:focus { top:12px; }
+
+/* ---- network activity line ---- */
+#topbar { position:fixed; top:0; left:0; right:0; height:3px; z-index:90; pointer-events:none; opacity:0; transition:opacity .25s ease; overflow:hidden; }
+#topbar.on { opacity:1; transition-delay:.12s; }
+#topbar i { display:block; height:100%; width:38%; background:var(--acc); border-radius:0 3px 3px 0; animation:slide 1.1s var(--ease) infinite; }
+@keyframes slide { from { transform:translateX(-100%); } to { transform:translateX(280%); } }
+
+/* ---- the string: Ek Tara's signature loader ---- */
+.string { display:block; fill:none; stroke:var(--acc,var(--brand)); stroke-width:2.6; stroke-linecap:round; overflow:visible; }
+.string circle { fill:var(--acc,var(--brand)); stroke:none; }
+.string.sm { width:58px; height:20px; } .string.md { width:110px; height:36px; } .string.lg { width:190px; height:63px; }
+#splash { position:fixed; inset:0; z-index:200; display:grid; place-items:center; background:var(--bg); transition:opacity .38s ease, visibility .38s; }
+#splash.out { opacity:0; visibility:hidden; }
+.sp-in { text-align:center; display:grid; justify-items:center; gap:10px; }
+.sp-word { font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:-.02em; margin-top:6px; }
+.sp-sub { color:var(--muted); font-size:14px; }
+
+/* ---- skeletons ---- */
+.sk { background:linear-gradient(90deg, var(--bg-2) 25%, color-mix(in srgb, var(--bg-2) 55%, var(--card)) 38%, var(--bg-2) 63%); background-size:400% 100%; animation:shimmer 1.5s ease-in-out infinite; border-radius:6px; }
+@keyframes shimmer { from { background-position:100% 50%; } to { background-position:0 50%; } }
+.sk-top { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:13px; margin-bottom:18px; }
+.sk-h1 { height:30px; width:min(320px,60%); margin-bottom:10px; } .sk-sub { height:14px; width:min(460px,80%); margin-bottom:22px; }
+.sk-row { display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:16px; padding:14px 0; border-bottom:1px solid var(--line); } .sk-row:last-child { border:0; } .sk-row .sk { height:14px; }
+.sk-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; } .sk-tile { height:84px; border-radius:var(--r-m); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+/* ---- header ---- */
+header { position:sticky; top:0; z-index:30; }
+header::before { content:""; position:absolute; inset:0; z-index:-1; background:color-mix(in srgb, var(--card) 80%, transparent); backdrop-filter:saturate(1.5) blur(14px); -webkit-backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--line); }
+.bar { max-width:1160px; margin:0 auto; padding:10px 20px; display:flex; align-items:center; gap:12px; }
+.logo { display:flex; align-items:center; gap:9px; font-family:var(--font-display); font-weight:700; font-size:20px; letter-spacing:-.02em; color:var(--text); }
+.mark { width:30px; height:30px; flex:none; }
+.mark-img { height:34px; width:auto; max-width:170px; object-fit:contain; flex:none; display:block; border-radius:0; }   /* never rounded: a rectangular logo must keep its corners */
+.foot-brand .mark-img { height:28px; } .sp-logo { max-width:240px; max-height:100px; object-fit:contain; border-radius:0; }
+html[data-theme="dark"] .mark-img, html[data-theme="dark"] .sp-logo { background:#fff; box-shadow:0 0 0 5px #fff; margin:5px; }   /* a light plate behind the logo, drawn outside it so nothing is clipped */
+html[data-logo="wide"] .logo > span, html[data-logo="wide"] .sp-word { display:none; }                          /* the logo already carries the name */
+.divbadge { font-size:12.5px; font-weight:650; padding:4px 11px; border-radius:99px; color:var(--acc); background:color-mix(in srgb, var(--acc) 13%, transparent); white-space:nowrap; }
+nav.tabs { display:flex; gap:2px; margin-left:4px; }
+nav.tabs a { display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:99px; color:var(--muted); font-weight:560; cursor:pointer; text-decoration:none; transition:background .15s, color .15s; white-space:nowrap; }
+nav.tabs a:hover { color:var(--text); background:var(--bg-2); }
+nav.tabs a.on { color:var(--acc); background:color-mix(in srgb, var(--acc) 12%, transparent); }
+nav.tabs a[aria-current="page"] { color:var(--acc); }
+.ni { display:none; } .ni svg { width:22px; height:22px; }
+.tools { margin-left:auto; display:flex; align-items:center; gap:6px; }
+.ibtn { width:36px; height:36px; display:grid; place-items:center; border:0; background:transparent; color:var(--text-2); border-radius:50%; cursor:pointer; transition:background .15s; }
+.ibtn:hover { background:var(--bg-2); } .ibtn svg { width:19px; height:19px; }
+.kbtn { display:flex; align-items:center; gap:8px; height:36px; padding:0 8px 0 12px; border:1px solid var(--line-2); background:var(--card); color:var(--muted); border-radius:99px; cursor:pointer; font:inherit; font-size:13.5px; }
+.kbtn:hover { border-color:var(--acc); color:var(--text); } .kbtn svg { width:17px; height:17px; }
+.kbtn span, .kbtn kbd, .me-email { display:none; } .kbtn { padding:0; width:36px; justify-content:center; }
+kbd { font:600 11.5px/1 var(--font-body); padding:3px 6px; border:1px solid var(--line-2); border-bottom-width:2px; border-radius:5px; background:var(--bg); color:var(--text-2); }
+.me { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12.5px; max-width:220px; }
+.avatar { width:30px; height:30px; border-radius:50%; background:var(--acc); color:var(--acc-ink); display:grid; place-items:center; font-weight:700; font-size:13px; flex:none; }
+.me-email { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#switch { display:inline-flex; align-items:center; gap:6px; } #switch svg { width:15px; height:15px; }
+
+main { width:100%; max-width:1160px; margin:0 auto; padding:28px 20px 48px; flex:1; outline:none; }
+main:focus, main:focus-visible, .modal:focus, .modal:focus-visible { outline:none; }
+main.enter { animation:viewin .24s var(--ease); }
+@keyframes viewin { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+.head { display:flex; justify-content:space-between; align-items:flex-end; gap:14px; margin-bottom:18px; flex-wrap:wrap; }
+.head .sub { margin:0; max-width:64ch; }
+
+/* ---- surfaces ---- */
+.card { background:var(--card); border:1px solid var(--line); border-radius:var(--r-m); padding:18px; margin-bottom:16px; }
+.alert { padding:11px 14px; border-radius:var(--r-s); margin-bottom:14px; background:color-mix(in srgb, var(--bad) 9%, var(--card)); border:1px solid color-mix(in srgb, var(--bad) 28%, var(--line)); border-left:4px solid var(--bad); color:var(--text); }
+.alert.ok { background:color-mix(in srgb, var(--ok) 9%, var(--card)); border-color:color-mix(in srgb, var(--ok) 28%, var(--line)); border-left-color:var(--ok); }
+.alert.info { background:color-mix(in srgb, var(--info) 9%, var(--card)); border-color:color-mix(in srgb, var(--info) 28%, var(--line)); border-left-color:var(--info); }
+.alert ul { margin:4px 0 0 18px; padding:0; }
+
+/* ---- controls ---- */
+.btn { position:relative; font:inherit; font-weight:580; border:1px solid var(--line-2); background:var(--card); color:var(--text); padding:8px 15px; border-radius:var(--r-s); cursor:pointer; transition:background .15s, border-color .15s, transform .08s; }
+.btn:hover { background:var(--bg); border-color:var(--muted); } .btn:active { transform:translateY(1px); }
+.btn:disabled { opacity:.5; cursor:default; transform:none; }
+.btn.primary { background:var(--acc); border-color:var(--acc); color:var(--acc-ink); }
+.btn.primary:hover { background:color-mix(in srgb, var(--acc) 86%, #000); border-color:color-mix(in srgb, var(--acc) 86%, #000); }
+.btn.danger { color:var(--bad); border-color:color-mix(in srgb, var(--bad) 45%, var(--line-2)); } .btn.danger:hover { background:color-mix(in srgb, var(--bad) 8%, var(--card)); }
+.btn.small { padding:4px 10px; font-size:12.5px; }
+.btn.is-busy { color:transparent !important; pointer-events:none; }
+.btn.is-busy::after { content:""; position:absolute; inset:0; margin:auto; width:16px; height:16px; border-radius:50%; border:2px solid var(--text); border-right-color:transparent; animation:spin .7s linear infinite; }
+.btn.primary.is-busy::after { border-color:var(--acc-ink); border-right-color:transparent; }
+@keyframes spin { to { transform:rotate(360deg); } }
+input, select, textarea { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line-2); border-radius:var(--r-s); padding:9px 11px; width:100%; transition:border-color .15s, box-shadow .15s; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent); }
+input::placeholder, textarea::placeholder { color:color-mix(in srgb, var(--muted) 75%, transparent); }
+textarea { min-height:96px; resize:vertical; }
+label { display:block; font-size:12.5px; font-weight:560; color:var(--text-2); margin:12px 0 5px; }
+label.inline { display:flex; align-items:center; gap:8px; color:var(--text); font-size:14.5px; font-weight:450; margin:12px 0; } label.inline input { width:auto; accent-color:var(--acc); }
+input[type="checkbox"] { accent-color:var(--acc); }
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; } .row > * { flex:1 1 160px; } .row > .btn { flex:0 0 auto; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; } @media (max-width:640px) { .grid2 { grid-template-columns:1fr; } }
+.checks { display:flex; flex-wrap:wrap; gap:6px 16px; margin:6px 0; } .checks label { display:flex; align-items:center; gap:7px; margin:0; font-size:14px; font-weight:450; color:var(--text); } .checks input { width:auto; }
+
+/* ---- data ---- */
+.scroll { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th { text-align:left; padding:10px 12px; font-size:12.5px; font-weight:600; color:var(--muted); border-bottom:1px solid var(--line-2); white-space:nowrap; }
+td { text-align:left; padding:12px; border-bottom:1px solid var(--line); vertical-align:top; }
+tbody tr:last-child td { border-bottom:0; }
+tr.click { cursor:pointer; } tr.click:hover td { background:color-mix(in srgb, var(--acc) 6%, var(--card)); }
+tr.click:focus-visible { outline:2px solid var(--acc); outline-offset:-2px; }
+.badge { --bc:var(--muted); display:inline-flex; gap:6px; align-items:center; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; white-space:nowrap; background:color-mix(in srgb, var(--bc) 13%, transparent); color:var(--bc); }
+.badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.b-sent,.b-delivered,.b-sending { --bc:var(--info); } .b-read { --bc:var(--violet); } .b-confirmed,.b-approved { --bc:var(--ok); }
+.b-declined,.b-pending_meta,.b-held,.b-awaiting_confirmation { --bc:var(--warn); } .b-flagged,.b-rejected,.b-failed { --bc:var(--bad); } .b-cancelled,.b-skipped { --bc:var(--muted); }
+.bar2 { display:flex; height:10px; border-radius:99px; overflow:hidden; background:var(--bg-2); }
+.bar2 span { display:block; transition:width .5s var(--ease); }
+.c-confirmed { background:var(--ok); } .c-declined { background:var(--warn); } .c-awaiting { background:var(--info); } .c-flagged { background:var(--bad); } .c-failed { background:var(--muted); } .c-cancelled { background:var(--line-2); }
+.chips { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0; }
+.chip { border:1px solid var(--line-2); background:var(--card); border-radius:99px; padding:5px 13px; cursor:pointer; font-size:13.5px; font-weight:520; transition:background .15s, border-color .15s; user-select:none; }
+.chip:hover { border-color:var(--acc); } .chip.on { background:var(--acc); border-color:var(--acc); color:var(--acc-ink); }
+.tl { list-style:none; margin:0; padding:0; } .tl li { padding:7px 0; border-bottom:1px dashed var(--line-2); font-size:13.5px; } .tl li:last-child { border:0; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
+.tile { background:var(--bg); border:1px solid var(--line); border-radius:var(--r-m); padding:14px; transition:border-color .15s, transform .15s; }
+.tile[data-seg]:hover { border-color:var(--acc); transform:translateY(-2px); }
+.tile b { display:block; font-family:var(--font-display); font-size:30px; line-height:1.1; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.seg { display:inline-block; min-width:30px; text-align:center; font-size:12px; font-weight:700; padding:2px 7px; border-radius:6px; background:color-mix(in srgb, var(--donor) 14%, transparent); color:var(--donor); }
+.seg.p { background:color-mix(in srgb, var(--violet) 14%, transparent); color:var(--violet); }
+.tag { display:inline-block; font-size:11px; font-weight:650; padding:2px 8px; border-radius:99px; background:color-mix(in srgb, var(--acc) 14%, transparent); color:var(--acc); margin-left:6px; vertical-align:middle; }
+.pill { display:inline-block; font-size:13px; font-weight:560; padding:5px 13px; border-radius:99px; background:color-mix(in srgb, var(--acc) 13%, transparent); color:var(--acc); margin-top:10px; }
+.wa { background:#dcf8c6; color:#111; border-radius:4px 14px 14px 14px; padding:10px 13px; white-space:pre-wrap; max-width:390px; box-shadow:0 1px 1px rgba(0,0,0,.18); }
+.wa .btns { display:flex; gap:6px; margin-top:9px; } .wa .btns span { flex:1; background:#fff; text-align:center; color:#0a7ea4; padding:7px; border-radius:8px; font-weight:560; }
+.live { display:inline-flex; align-items:center; gap:7px; color:var(--muted); font-size:12.5px; } .live i { width:8px; height:8px; border-radius:50%; background:var(--ok); animation:pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.35; transform:scale(.7); } }
+
+/* ---- empty states ---- */
+.empty, .empty-state { text-align:center; padding:44px 16px; color:var(--muted); }
+.empty-state { display:grid; justify-items:center; gap:8px; }
+.empty-state h3 { color:var(--text); font-size:18px; } .empty-state p { margin:0 0 8px; max-width:46ch; }
+.es-ico { width:58px; height:58px; border-radius:18px; display:grid; place-items:center; color:var(--acc); background:color-mix(in srgb, var(--acc) 12%, transparent); } .es-ico svg { width:28px; height:28px; }
+
+/* ---- modal, toasts ---- */
+.overlay { position:fixed; inset:0; z-index:50; display:flex; justify-content:center; align-items:flex-start; padding:7vh 14px; overflow:auto; background:color-mix(in srgb, #040b09 56%, transparent); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); animation:fade .18s ease; }
+@keyframes fade { from { opacity:0; } to { opacity:1; } }
+.modal { background:var(--card); border:1px solid var(--line); border-radius:var(--r-l); padding:24px; width:100%; max-width:640px; box-shadow:var(--sh-2); animation:sheet .24s var(--ease); outline:none; }
+.modal.wide { max-width:860px; }
+@keyframes sheet { from { opacity:0; transform:translateY(14px) scale(.985); } to { opacity:1; transform:none; } }
+@keyframes sheetup { from { transform:translateY(40px); opacity:.6; } to { transform:none; opacity:1; } }
+.modal h2 { font-size:19px; } .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; flex-wrap:wrap; }
+.busy-modal { display:grid; justify-items:center; gap:6px; text-align:center; padding:6px 0 2px; }
+.meter { width:100%; max-width:260px; height:5px; border-radius:99px; background:var(--bg-2); overflow:hidden; margin:8px 0; } .meter i { display:block; height:100%; width:0; background:var(--acc); border-radius:99px; transition:width .35s var(--ease); }
+.done { display:grid; justify-items:center; gap:10px; padding:14px 0; text-align:center; }
+.okmark { width:64px; height:64px; fill:none; stroke:var(--ok); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+.okmark circle { stroke-dasharray:145; stroke-dashoffset:145; animation:draw .5s var(--ease) forwards; opacity:.9; } .okmark path { stroke-dasharray:40; stroke-dashoffset:40; animation:draw .35s .38s var(--ease) forwards; }
+@keyframes draw { to { stroke-dashoffset:0; } }
+#toasts { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:120; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; width:max-content; max-width:92vw; }
+.toast { pointer-events:auto; position:relative; overflow:hidden; display:flex; align-items:center; gap:10px; background:var(--text); color:var(--bg); padding:11px 16px 13px; border-radius:var(--r-m); box-shadow:var(--sh-2); max-width:min(520px,92vw); cursor:pointer; animation:toastin .26s var(--ease); font-weight:520; }
+.toast.out { opacity:0; transform:translateY(8px); transition:opacity .18s, transform .18s; }
+.toast .ti svg { width:18px; height:18px; display:block; } .toast .ti { color:#6ee0a8; display:grid; } .toast.err .ti { color:#ff9c93; }
+.toast .tp { position:absolute; left:0; bottom:0; height:3px; width:100%; background:currentColor; opacity:.35; transform-origin:left; animation:life var(--life,4s) linear forwards; } .toast.hold .tp { animation-play-state:paused; }
+@keyframes toastin { from { opacity:0; transform:translateY(12px) scale(.97); } to { opacity:1; transform:none; } }
+@keyframes life { to { transform:scaleX(0); } }
+#offline { position:fixed; top:0; left:0; right:0; z-index:95; padding:8px 14px; text-align:center; font-weight:600; background:var(--warn); color:#fff; }
+
+/* ---- command palette ---- */
+.overlay.cmd { padding-top:12vh; }
+.cmdk { width:100%; max-width:600px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-l); box-shadow:var(--sh-2); overflow:hidden; animation:sheet .2s var(--ease); align-self:flex-start; }
+.cmdk-in { display:flex; align-items:center; gap:10px; padding:4px 16px; border-bottom:1px solid var(--line); } .cmdk-in svg { width:19px; height:19px; color:var(--muted); flex:none; }
+.cmdk-in input { border:0; box-shadow:none !important; padding:14px 0; font-size:16px; background:transparent; } .cmdk-in input:focus { box-shadow:none; }
+.cmdk-list { max-height:min(52vh,420px); overflow:auto; padding:6px; margin:0; list-style:none; }
+.cmdk-list li { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:var(--r-s); cursor:pointer; }
+.cmdk-list li svg { width:18px; height:18px; color:var(--muted); flex:none; } .cmdk-list li small { margin-left:auto; color:var(--muted); font-size:12px; }
+.cmdk-list li[aria-selected="true"] { background:color-mix(in srgb, var(--acc) 12%, transparent); } .cmdk-list li[aria-selected="true"] svg { color:var(--acc); }
+.cmdk-group { padding:8px 12px 4px; font-size:12px; font-weight:650; color:var(--muted); cursor:default !important; }
+.cmdk-foot { display:flex; gap:14px; padding:9px 16px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 18px; align-items:center; } .keys dt { white-space:nowrap; } .keys dd { margin:0; color:var(--text-2); }
+
+/* ---- landing ---- */
+.landing { min-height:62vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px 8px; }
+.landing h1 { font-size:34px; margin:0 0 8px; } .landing h1:focus { outline:none; } .landing .lead { font-size:17.5px; margin:0 0 4px; } .landing .sub2 { color:var(--muted); margin:0; }
+.lico { width:88px; height:88px; border-radius:26px; display:grid; place-items:center; margin-bottom:20px; color:var(--acc); background:color-mix(in srgb, var(--acc) 13%, transparent); }
+.lico svg { width:46px; height:46px; }
+@keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+@keyframes pop { from { opacity:0; transform:scale(.55); } to { opacity:1; transform:scale(1); } }
+@keyframes fill { from { width:0; } to { width:100%; } }
+.rise { opacity:0; animation:rise .55s var(--ease) forwards; } .pop { opacity:0; animation:pop .6s cubic-bezier(.2,.9,.3,1.15) forwards; }
+.d1 { animation-delay:.12s; } .d2 { animation-delay:.3s; } .d3 { animation-delay:.48s; } .d4 { animation-delay:.66s; }
+.prog { width:230px; height:4px; border-radius:99px; background:var(--bg-2); overflow:hidden; margin:22px auto 12px; }
+.prog i { display:block; height:100%; width:0; background:var(--acc); animation:fill var(--dur,2.4s) ease-out forwards; }
+.dcards { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; width:100%; max-width:920px; margin-top:28px; }
+.dcard { text-align:left; font:inherit; color:inherit; cursor:pointer; background:var(--card); border:1px solid var(--line); border-top:4px solid var(--acc); border-radius:var(--r-l); padding:22px; display:flex; flex-direction:column; gap:8px; transition:transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s; }
+.dcard:hover, .dcard:focus-visible { transform:translateY(-4px); box-shadow:var(--sh-2); border-color:color-mix(in srgb, var(--acc) 40%, var(--line)); border-top-color:var(--acc); }
+.dcard .lico { width:60px; height:60px; border-radius:18px; margin:0 0 6px; } .dcard .lico svg { width:32px; height:32px; }
+.dcard h2 { margin:0; font-size:20px; } .dcard p { margin:0; color:var(--muted); flex:1; }
+.dcard .go { font-weight:650; color:var(--acc); margin-top:8px; background:linear-gradient(currentColor,currentColor) 0 100%/0 2px no-repeat; align-self:flex-start; transition:background-size .25s var(--ease); }
+.dcard:hover .go, .dcard:focus-visible .go { background-size:100% 2px; }
+
+/* ---- footer ---- */
+#foot { margin-top:auto; border-top:1px solid var(--line); background:color-mix(in srgb, var(--card) 60%, transparent); }
+.foot-in { max-width:1160px; margin:0 auto; padding:22px 20px 26px; display:grid; grid-template-columns:1.3fr 1fr auto; gap:14px 28px; align-items:start; }
+.foot-brand { display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-weight:700; font-size:16px; } .foot-brand .mark { width:26px; height:26px; }
+.foot-brand small { display:block; font-family:var(--font-body); font-weight:450; color:var(--muted); font-size:12.5px; margin-top:1px; }
+.foot-meta { display:grid; gap:4px; font-size:13px; color:var(--muted); } .foot-meta b { color:var(--text-2); font-weight:600; }
+.dot { display:inline-flex; align-items:center; gap:7px; } .dot::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--ok); } .dot.off::before { background:var(--bad); }
+.foot-actions { display:flex; flex-wrap:wrap; gap:4px 14px; justify-content:flex-end; }
+.link { background:none; border:0; padding:4px 0; font:inherit; font-size:13px; color:var(--text-2); cursor:pointer; text-decoration:underline; text-decoration-color:var(--line-2); text-underline-offset:4px; } .link:hover { color:var(--acc); text-decoration-color:var(--acc); }
+.foot-note { grid-column:1 / -1; margin:6px 0 0; padding-top:12px; border-top:1px solid var(--line); font-size:12.5px; color:var(--muted); max-width:none; }
+
+/* ---- compact header on laptops ---- */
+.logo, .logo span, .kbtn, .divbadge, nav.tabs a, #switch, .btn { white-space:nowrap; }
+.tools > * { flex:none; }
+@media (max-width:1320px) { .bar { gap:10px; } }
+/* ---- narrow laptops, tablets, phones: tabs move to a bottom bar ---- */
+@media (max-width:1180px) {
+  #switch { font-size:0; padding:0; width:36px; height:36px; justify-content:center; border-radius:50%; } #switch svg { width:17px; height:17px; }
+  nav.tabs { position:fixed; left:0; right:0; bottom:0; z-index:35; margin:0; gap:0; justify-content:space-around; background:color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-top:1px solid var(--line); padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  nav.tabs a { flex:1; flex-direction:column; gap:2px; font-size:11px; padding:6px 2px; border-radius:12px; min-width:0; }
+  nav.tabs a span { overflow:hidden; text-overflow:ellipsis; max-width:100%; } .ni { display:block; }
+  #dnav a { font-size:10px; letter-spacing:-.01em; padding:6px 0; } #dnav .ni svg { width:20px; height:20px; }
+  main { padding:20px 16px 110px; } #foot { padding-bottom:70px; } #toasts { bottom:84px; }
+  .foot-in { grid-template-columns:1fr; } .foot-actions { justify-content:flex-start; }
+  h1 { font-size:26px; } .landing h1 { font-size:28px; }
+}
+@media (max-width:560px) { .divbadge { display:none; } }
+@media (max-width:640px) {
+  .overlay { align-items:flex-end; padding:0; }
+  .modal, .modal.wide { max-width:none; border-radius:20px 20px 0 0; max-height:92vh; overflow:auto; padding:22px 18px calc(22px + env(safe-area-inset-bottom)); animation:sheetup .28s var(--ease); }
+  .overlay.cmd { align-items:flex-start; padding:10vh 10px 0; } .cmdk { border-radius:var(--r-l); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important; }
+  .rise, .pop { opacity:1; } .prog i { width:100%; } .sk { animation:none; } #topbar i { animation:none; width:100%; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div id="topbar" aria-hidden="true"><i></i></div>
+<div id="splash" role="status" aria-label="Loading Ek Tara">
+  <div class="sp-in">
+    <svg class="string lg" viewBox="0 0 120 40" aria-hidden="true" focusable="false"><circle cx="6" cy="20" r="3"/><circle cx="114" cy="20" r="3"/><path d="M6 20 Q60 20 114 20"><animate attributeName="d" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.1;.22;.34;.47;.6;.74;.88;1" keySplines=".37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1" values="M6 20 Q60 38 114 20;M6 20 Q60 2 114 20;M6 20 Q60 32 114 20;M6 20 Q60 8 114 20;M6 20 Q60 27 114 20;M6 20 Q60 13 114 20;M6 20 Q60 22 114 20;M6 20 Q60 20 114 20;M6 20 Q60 20 114 20"/></path></svg>
+    <div class="sp-word">Ek Tara</div>
+    <div class="sp-sub">Opening your workspace</div>
+  </div>
+</div>
+<header><div class="bar">
+  <span class="logo"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--acc)"/><path d="M6 17 Q16 6 26 17" fill="none" stroke="var(--acc-ink)" stroke-width="2.6" stroke-linecap="round"/><circle cx="6" cy="17" r="2.2" fill="var(--acc-ink)"/><circle cx="26" cy="17" r="2.2" fill="var(--acc-ink)"/></svg><span>Ek Tara</span></span>
+  <span class="divbadge" id="divbadge" hidden></span>
+  <nav class="tabs" id="nav" hidden aria-label="Parent Communication"></nav>
+  <nav class="tabs" id="dnav" hidden aria-label="Donor Communication"></nav>
+  <div class="tools">
+    <button class="kbtn" id="cmdbtn" aria-label="Search or jump to" title="Search or jump to (Ctrl K)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to</span><kbd>Ctrl K</kbd></button>
+    <button class="btn small" id="switch" hidden title="Switch division" aria-label="Switch division"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg>Switch division</button>
+    <button class="ibtn" id="adminbtn" hidden aria-label="Users and access" title="Users and access"></button>
+    <button class="ibtn" id="themebtn" aria-label="Change theme" title="Change theme"></button>
+    <span class="me" title="<?= userEmail ?>"><span class="avatar" id="avatar"></span><span class="me-email"><?= userEmail ?></span></span>
+  </div>
+</div></header>
+<main id="main" tabindex="-1" aria-live="polite"><div class="visually-hidden" role="status">Loading</div></main>
+<footer id="foot">
+  <div class="foot-in">
+    <div class="foot-brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--acc)"/><path d="M6 17 Q16 6 26 17" fill="none" stroke="var(--acc-ink)" stroke-width="2.6" stroke-linecap="round"/><circle cx="6" cy="17" r="2.2" fill="var(--acc-ink)"/><circle cx="26" cy="17" r="2.2" fill="var(--acc-ink)"/></svg><div>Ek Tara Communications<small id="foot-div">Parent and donor communication</small></div></div>
+    <div class="foot-meta"><span id="foot-status" class="dot">Connected</span><span>Signed in as <b id="foot-user"><?= userEmail ?></b></span></div>
+    <div class="foot-actions"><button class="link" id="f-keys">Keyboard shortcuts</button><button class="link" id="f-theme">Theme: Auto</button><button class="link" id="f-switch" hidden>Switch division</button></div>
+    <p class="foot-note">Parent and donor records are visible only to people with access. Records live in your organisation&rsquo;s Google Sheet. &copy; <span id="foot-year"></span> Ek Tara. <span class="muted" id="foot-build" title="Which version of the app is running"></span></p>
+  </div>
+</footer>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<script>
+// ---------- helpers ----------
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+
+function call(method, ...args) {
+  // The button that was just clicked shows a spinner until this request ends (also stops double clicks).
+  const btn = state.clicked && Date.now() - state.clicked.t < 120 && state.clicked.b.isConnected ? state.clicked.b : null; state.clicked = null;
+  if (btn) { btn.classList.add('is-busy'); btn.setAttribute('aria-busy', 'true'); }
+  netStart();
+  const settle = reachable => { netEnd(); setOnline(reachable); if (btn) { btn.classList.remove('is-busy'); btn.removeAttribute('aria-busy'); } };
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(r => {
+        settle(true);
+        if (r && r.ok) return resolve(r.data);
+        const e = new Error((r && r.error) || 'Request failed'); e.errors = r && r.errors; e.status = r && r.status;
+        if (method !== 'session') guard(e);
+        reject(e);
+      })
+      .withFailureHandler(err => {
+        settle(false);
+        const msg = (err && err.message) || String(err);
+        const e = new Error(msg); if (/sign.?in|log.?in|session|not signed|authori[sz]/i.test(msg)) e.status = 401;
+        if (method !== 'session') guard(e);
+        reject(e);
+      })
+      .api(method, args);
+  });
+}
+// 401: session expired. 403: permissions changed (the server said no): go back to the landing screen.
+function guard(e) {
+  if (e.status === 401) showExpired();
+  else if (e.status === 403 && !state.busy403) {
+    state.busy403 = true;
+    setTimeout(() => { state.busy403 = false; showLanding({ notice: 'Your access has changed. Here is what you can open now.' }); }, 0);
+  }
+}
+
+// ---------- icons ----------
+const svgi = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+const ICON = {
+  check: svgi('<path d="m5 12.5 4.5 4.5L19 7.5"/>'), alert: svgi('<path d="M12 8v5m0 3.5v.01"/><circle cx="12" cy="12" r="9"/>'),
+  search: svgi('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'), sun: svgi('<circle cx="12" cy="12" r="4"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/>'),
+  moon: svgi('<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>'), auto: svgi('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/>'),
+  send: svgi('<path d="m21 3-9.5 18-2.2-7.8L2 11z"/><path d="m21 3-11.7 10.2"/>'), users: svgi('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>'),
+  file: svgi('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>'), grid: svgi('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+  heart: svgi('<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/>'), radio: svgi('<circle cx="12" cy="12" r="2"/><path d="M8 8a5.7 5.7 0 0 0 0 8m8-8a5.7 5.7 0 0 1 0 8M5 5a10 10 0 0 0 0 14m14-14a10 10 0 0 1 0 14"/>'),
+  list: svgi('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>'), plus: svgi('<path d="M12 5v14M5 12h14"/>'), upload: svgi('<path d="M12 16V4m0-0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
+  cog: svgi('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'), shield: svgi('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/>'),
+  kbd: svgi('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'), swap: svgi('<path d="M7 7h12l-3-3M17 17H5l3 3"/>'), home: svgi('<path d="m4 11 8-7 8 7M6 10v9h12v-9"/>')
+};
+const NAVS = {
+  nav: [['campaigns', 'Campaigns', 'send'], ['parents', 'Parents', 'users'], ['templates', 'Templates', 'file']],
+  dnav: [['donor/home', 'Overview', 'grid'], ['donor/donors', 'Donors', 'heart'], ['donor/campaigns', 'Campaigns', 'send'], ['donor/templates', 'Templates', 'file'], ['donor/broadcasts', 'Broadcasts', 'radio'], ['donor/queue', 'Queue', 'list']]
+};
+Object.keys(NAVS).forEach(id => { $('#' + id).innerHTML = NAVS[id].map(n => '<a data-go="' + n[0] + '" href="#"><i class="ni">' + ICON[n[2]] + '</i><span>' + n[1] + '</span></a>').join(''); });
+
+// ---------- the string: Ek Tara's signature loader ----------
+const reduce = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+function stringSvg(size) {
+  const v = ['M6 20 Q60 38 114 20', 'M6 20 Q60 2 114 20', 'M6 20 Q60 32 114 20', 'M6 20 Q60 8 114 20', 'M6 20 Q60 27 114 20', 'M6 20 Q60 13 114 20', 'M6 20 Q60 22 114 20', 'M6 20 Q60 20 114 20', 'M6 20 Q60 20 114 20'];
+  const anim = reduce() ? '' : '<animate attributeName="d" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.1;.22;.34;.47;.6;.74;.88;1" keySplines="' + v.slice(1).map(() => '.37 0 .63 1').join(';') + '" values="' + v.join(';') + '"/>';
+  return '<svg class="string ' + (size || 'sm') + '" viewBox="0 0 120 40" aria-hidden="true" focusable="false"><circle cx="6" cy="20" r="3"/><circle cx="114" cy="20" r="3"/><path d="M6 20 Q60 20 114 20">' + anim + '</path></svg>';
+}
+if (reduce()) $$('#splash animate').forEach(a => a.remove());
+function hideSplash() {
+  const sp = $('#splash'); if (!sp) return;
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 450); }, Math.max(0, 900 - performance.now()));
+}
+
+// ---------- skeleton screens (shown while a view loads) ----------
+const skRows = n => Array.from({ length: n }, () => '<div class="sk-row"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>').join('');
+function skeleton(kind) {
+  return '<div role="status" aria-label="Loading"><div class="sk-top">' + stringSvg('sm') + '<span>Loading</span></div><div class="sk sk-h1"></div><div class="sk sk-sub"></div>' +
+    (kind === 'tiles' ? '<div class="sk-tiles">' + Array.from({ length: 7 }, () => '<div class="sk sk-tile"></div>').join('') + '</div><div class="card" style="margin-top:16px">' + skRows(3) + '</div>'
+      : '<div class="card">' + skRows(6) + '</div>') + '</div>';
+}
+const loading = kind => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); m.innerHTML = skeleton(kind); };
+
+// ---------- network activity, connection status ----------
+let pendingCalls = 0;
+function netStart() { pendingCalls++; $('#topbar').classList.add('on'); }
+function netEnd() { pendingCalls = Math.max(0, pendingCalls - 1); if (!pendingCalls) $('#topbar').classList.remove('on'); }
+function setOnline(ok) {
+  const el = $('#foot-status'); if (!el) return;
+  el.classList.toggle('off', !ok); el.textContent = ok ? 'Connected' : 'Connection problem';
+}
+window.addEventListener('offline', () => { if ($('#offline')) return; const b = document.createElement('div'); b.id = 'offline'; b.setAttribute('role', 'alert'); b.textContent = 'You are offline. Changes cannot be saved until you reconnect.'; document.body.appendChild(b); setOnline(false); });
+window.addEventListener('online', () => { const b = $('#offline'); if (b) b.remove(); setOnline(true); toast('Back online'); });
+
+// ---------- toasts ----------
+function toast(msg, isErr) {
+  const box = $('#toasts'); while (box.children.length >= 4) box.firstChild.remove();
+  const t = document.createElement('div'); t.className = 'toast' + (isErr ? ' err' : ''); t.setAttribute('role', isErr ? 'alert' : 'status');
+  t.innerHTML = '<span class="ti">' + (isErr ? ICON.alert : ICON.check) + '</span><span class="tm"></span><i class="tp"></i>';
+  t.querySelector('.tm').textContent = msg;
+  const life = isErr ? 7000 : 3800; t.style.setProperty('--life', life + 'ms');
+  box.appendChild(t);
+  let timer = setTimeout(rm, life);
+  function rm() { t.classList.add('out'); setTimeout(() => t.remove(), 200); }
+  t.onmouseenter = () => { clearTimeout(timer); t.classList.add('hold'); };
+  t.onmouseleave = () => { t.classList.remove('hold'); timer = setTimeout(rm, 1800); };
+  t.onclick = rm;
+}
+
+// ---------- modals: focus trap, Esc, restores focus, bottom sheet on phones ----------
+function autoLabel(root) {
+  $$('label', root).forEach(l => { if (l.htmlFor) return; const c = l.parentElement && l.parentElement.querySelector('input,select,textarea'); if (c && c.id) l.htmlFor = c.id; });
+}
+function modal(html, wide) {
+  const o = document.createElement('div'); o.className = 'overlay';
+  o.innerHTML = '<div class="modal' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true" tabindex="-1">' + html + '</div>';
+  const panel = o.firstChild, prev = document.activeElement;
+  o.addEventListener('mousedown', e => { if (e.target === o && !o.dataset.noesc) o.close(); });
+  document.body.appendChild(o); document.body.classList.add('noscroll');
+  const h = panel.querySelector('h1,h2'); if (h) { if (!h.id) h.id = 'mh' + Date.now() % 1e6; panel.setAttribute('aria-labelledby', h.id); }
+  autoLabel(panel);
+  o.close = () => {
+    if (!o.isConnected) return; o.remove();
+    if (!$('.overlay')) document.body.classList.remove('noscroll');
+    if (prev && prev.isConnected && prev !== document.body) { try { prev.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  };
+  const first = panel.querySelector('input:not([type=hidden]),select,textarea'); (first || panel).focus({ preventScroll: true });
+  return o;
+}
+document.addEventListener('keydown', e => {
+  const top = Array.from(document.querySelectorAll('.overlay')).pop(); if (!top) return;
+  if (e.key === 'Escape' && !top.dataset.noesc && top.close) { e.preventDefault(); top.close(); return; }
+  if (e.key !== 'Tab') return;
+  const f = Array.from(top.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])')).filter(x => x.offsetParent !== null);
+  if (!f.length) return;
+  const i = f.indexOf(document.activeElement);
+  if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+});
+
+// ---------- empty states, count-up, success mark ----------
+function emptyState(icon, title, text, btn) {
+  return '<div class="empty-state"><div class="es-ico">' + ICON[icon] + '</div><h3>' + esc(title) + '</h3><p>' + esc(text) + '</p>' + (btn ? '<button class="btn primary" ' + btn.attr + '>' + esc(btn.label) + '</button>' : '') + '</div>';
+}
+const fmtNum = n => Number(n).toLocaleString('en-IN');
+function countUp(root) {
+  $$('[data-count]', root).forEach(el => {
+    const to = Number(el.dataset.count) || 0;
+    if (reduce() || to < 3) { el.textContent = fmtNum(to); return; }
+    const t0 = performance.now();
+    (function step(t) { const p = Math.min(1, (t - t0) / 700); el.textContent = fmtNum(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(step); })(t0);
+  });
+}
+const CHECKMARK = '<svg class="okmark" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="23"/><path d="M15 27l8 8 14-17"/></svg>';
+async function showDone(m, text, sub) {
+  const p = m.querySelector('.modal'); if (!p) return;
+  p.innerHTML = '<div class="done" role="status">' + CHECKMARK + '<h2>' + esc(text) + '</h2>' + (sub ? '<p class="muted" style="margin:0">' + esc(sub) + '</p>' : '') + '</div>';
+  await new Promise(r => setTimeout(r, reduce() ? 500 : 1100));
+}
+
+const fmtDate = iso => iso ? new Date(iso).toLocaleString(undefined, { day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+function timeAgo(iso) {
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return 'just now'; if (m < 60) return m + ' min ago';
+  const h = Math.floor(m / 60); if (h < 24) return h + ' h ago';
+  const d = Math.floor(h / 24); return d < 7 ? d + ' d ago' : fmtDate(iso);
+}
+function callTime(iso) {
+  const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }), n = new Date(), tm = new Date(n); tm.setDate(n.getDate() + 1);
+  if (w.toDateString() === n.toDateString()) return 'around ' + t + ' today';
+  if (w.toDateString() === tm.toDateString()) return 'around ' + t + ' tomorrow';
+  return 'around ' + t + ', ' + w.toLocaleDateString(undefined, { day:'numeric', month:'short' });
+}
+const money = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style:'currency', currency:cur, maximumFractionDigits:0 }).format(n); } catch (e) { return Math.round(n) + ' ' + cur; } };
+const LABELS = { pending_meta:'Pending Meta', flagged:'Needs follow-up', awaiting_confirmation:'Awaiting trustee', held:'Held', skipped:'Skipped' };
+const label = s => LABELS[s] || (s.charAt(0).toUpperCase() + s.slice(1));
+const badge = s => '<span class="badge b-' + esc(s) + '">' + esc(label(s)) + '</span>';
+const placeholders = body => Array.from(new Set((String(body).match(/\{\{(\d+)\}\}/g) || []).map(x => parseInt(x.slice(2), 10)))).sort((a, b) => a - b);
+const GROUPS = [
+  { key:'confirmed', label:'Confirmed', statuses:['confirmed'] }, { key:'declined', label:'Declined', statuses:['declined'] },
+  { key:'awaiting', label:'Awaiting reply', statuses:['queued','sent','delivered','read'] },
+  { key:'flagged', label:'Needs follow-up', statuses:['flagged'] }, { key:'failed', label:'Failed', statuses:['failed'] },
+  { key:'cancelled', label:'Cancelled', statuses:['cancelled'] }
+];
+const gcount = (counts, st) => st.reduce((s, k) => s + (counts[k] || 0), 0);
+function progressBar(counts) {
+  const total = counts.total || 0;
+  if (!total) return '<div class="bar2"></div>';
+  return '<div class="bar2">' + GROUPS.map(g => { const n = gcount(counts, g.statuses); return n ? '<span class="c-' + g.key + '" style="width:' + (n / total * 100) + '%" title="' + g.label + ': ' + n + '"></span>' : ''; }).join('') + '</div>';
+}
+function errorsHtml(e) {
+  if (e.errors && e.errors.length > 1) return '<div class="alert">' + esc(e.errors[0]) + '<ul>' + e.errors.slice(1).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+  return '<div class="alert">' + esc(e.message) + '</div>';
+}
+function errorsListHtml(e) {
+  if (e.errors && e.errors.length) return '<div class="alert"><ul>' + e.errors.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+  return '<div class="alert">' + esc(e.message) + '</div>';
+}
+const main = () => $('#main');
+
+// Choice helpers for institution -> class/year -> section
+function tally(items, keyFn, countFn) {
+  const m = new Map(); items.forEach(i => { const k = keyFn(i); if (k) m.set(k, (m.get(k) || 0) + countFn(i)); });
+  return Array.from(m, ([value, count]) => ({ value, count })).sort((a, b) => natural(a.value, b.value));
+}
+const opt = (v, text, sel) => '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(text) + '</option>';
+
+// ---------- router ----------
+const state = { info: null, notices: [] };
+const views = {};
+const TILE_VIEWS = ['donor/home', 'overview/home'];
+async function go(view, arg) {
+  clearInterval(state.refresh); clearTimeout(state.timer); state.view = view;   // opening a screen cancels the welcome screen's automatic redirect
+  $$('#nav a, #dnav a').forEach(a => { const on = a.dataset.go === view || a.dataset.go === view.split('/')[0]; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  loading(TILE_VIEWS.indexOf(view) >= 0 ? 'tiles' : 'table'); window.scrollTo({ top: 0, behavior: 'auto' });
+  try { await views[view](arg); }
+  catch (e) { if (e.status === 403 || e.status === 401) return; main().innerHTML = '<div class="alert">' + esc(e.message) + '</div>'; }
+  finally { settleView(); }
+}
+// After a view renders: quiet fade-in, keyboard access for clickable rows, labels, focus for screen readers.
+function settleView() {
+  const m = main(); m.removeAttribute('aria-busy');
+  $$('tr.click, .chip, .tile[data-seg]', m).forEach(x => { if (!x.hasAttribute('tabindex')) { x.tabIndex = 0; x.setAttribute('role', x.tagName === 'TR' ? 'button' : 'button'); } });
+  autoLabel(m); countUp(m);
+  m.classList.remove('enter'); void m.offsetWidth; m.classList.add('enter');
+  if (!document.activeElement || document.activeElement === document.body || !m.contains(document.activeElement)) { try { m.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+}
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr.click, .chip, .tile[data-seg]')) { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener('click', e => { const b = e.target.closest('button.btn'); state.clicked = b ? { b: b, t: Date.now() } : null; }, true);
+document.addEventListener('click', e => { const c = e.target.closest('[data-click]'); if (c) { const t = $(c.dataset.click); if (t) t.click(); } });
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-go]'); if (a) { e.preventDefault(); go(a.dataset.go, a.dataset.arg); }
+});
+
+async function loadNotices() {
+  try { state.notices = await call('templates.notifications'); } catch (e) { state.notices = []; }
+}
+function noticesHtml() {
+  return state.notices.map(n => n.status === 'approved'
+    ? '<div class="alert ok">Your template <b>' + esc(n.name) + '</b> (' + esc(n.language) + ') was approved. <a href="#" data-seen="' + n.id + '">Dismiss</a></div>'
+    : '<div class="alert">Your template <b>' + esc(n.name) + '</b> was rejected: ' + esc(n.rejection_reason || '') + ' <a href="#" data-seen="' + n.id + '">Dismiss</a></div>').join('');
+}
+document.addEventListener('click', async e => {
+  const a = e.target.closest('[data-seen]'); if (!a) return; e.preventDefault();
+  await call('templates.seen', a.dataset.seen).catch(() => {});
+  state.notices = state.notices.filter(n => n.id !== a.dataset.seen); a.closest('.alert').remove();
+});
+
+// ---------- campaigns: list ----------
+views.campaigns = async function () {
+  await loadNotices();
+  const [groups, list] = await Promise.all([call('parents.groups'), call('campaigns.list', {})]);
+  let rows = list, offset = list.length;
+  const f = { institution: '', class_or_year: '', section: '' };
+
+  function draw() {
+    const insts = tally(groups, g => g.institution, g => g.parent_count);
+    const levels = f.institution ? tally(groups.filter(g => g.institution === f.institution), g => g.class_or_year, g => g.parent_count) : [];
+    const secs = f.class_or_year ? tally(groups.filter(g => g.institution === f.institution && g.class_or_year === f.class_or_year), g => g.section, g => g.parent_count) : [];
+    main().innerHTML = noticesHtml() +
+      '<div class="head"><div><h1>Campaigns</h1><p class="sub" style="margin:0">Announcements sent to parents and how they responded.</p></div>' +
+      '<button class="btn primary" data-go="campaigns/new">New campaign</button></div>' +
+      '<div class="card"><div class="row">' +
+      '<div><label>School / college</label><select id="f-inst"><option value="">All</option>' + insts.map(i => opt(i.value, i.value, i.value === f.institution)).join('') + '</select></div>' +
+      '<div><label>Class / year</label><select id="f-lvl" ' + (f.institution ? '' : 'disabled') + '><option value="">All</option>' + levels.map(i => opt(i.value, i.value, i.value === f.class_or_year)).join('') + '</select></div>' +
+      '<div><label>Section</label><select id="f-sec" ' + (f.class_or_year ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === f.section)).join('') + '</select></div>' +
+      '</div></div>' +
+      (rows.length ? '<div class="card scroll"><table><thead><tr><th>Sent</th><th>Audience</th><th>Template</th><th>By</th><th>Status</th><th style="min-width:160px">Responses</th></tr></thead><tbody>' +
+        rows.map(c => '<tr class="click" data-go="campaigns/detail" data-arg="' + c.id + '"><td>' + esc(timeAgo(c.created_at)) + '</td><td>' + esc(c.audience) + '</td><td>' + esc(c.template_name) + '</td><td>' + esc(c.sender || '') + '</td><td>' + badge(c.status) + '</td>' +
+          '<td>' + progressBar(c.counts) + '<div class="small muted">' + gcount(c.counts, ['confirmed', 'declined']) + ' of ' + c.counts.total + ' answered</div></td></tr>').join('') +
+        '</tbody></table></div>' + (rows.length % 50 === 0 ? '<button class="btn" id="more">Load more</button>' : '')
+        : '<div class="card">' + emptyState('send', 'No campaigns yet', 'Send a WhatsApp message to a class or a whole school, then see who has answered.', { label: 'New campaign', attr: 'data-go="campaigns/new"' }) + '</div>');
+    $('#f-inst').onchange = async e => { f.institution = e.target.value; f.class_or_year = ''; f.section = ''; await refetch(); };
+    $('#f-lvl').onchange = async e => { f.class_or_year = e.target.value; f.section = ''; await refetch(); };
+    $('#f-sec').onchange = async e => { f.section = e.target.value; await refetch(); };
+    const more = $('#more'); if (more) more.onclick = async () => { const next = await call('campaigns.list', Object.assign({ offset }, f)); rows = rows.concat(next); offset += next.length; if (!next.length) toast('No more campaigns'); draw(); };
+    $$('[data-seen]').forEach(() => {});
+  }
+  async function refetch() { rows = await call('campaigns.list', f); offset = rows.length; draw(); }
+  draw();
+};
+views['campaigns/detail'] = id => campaignDetail(id);
+
+// ---------- campaigns: new ----------
+views['campaigns/new'] = async function (preselected) {
+  const [groups, templates, info] = await Promise.all([call('parents.groups'), call('templates.list', 'approved'), call('info')]);
+  state.info = info;
+  if (!groups.length || !templates.length) {
+    main().innerHTML = '<div class="head"><h1>New campaign</h1></div><div class="card empty">' +
+      (!groups.length ? 'No parents yet. <a href="#" data-go="parents">Upload parents</a> first.' : 'No approved template yet. <a href="#" data-go="templates/new">Request a template</a> and wait for Meta to approve it.') + '</div>';
+    return;
+  }
+  const s = { inst: '', lvl: '', sec: '', tpl: preselected && templates.some(t => t.id === preselected) ? preselected : '', values: {} };
+  const insts = tally(groups, g => g.institution, g => g.parent_count);
+
+  function audienceGroups() { return groups.filter(g => g.institution === s.inst && (!s.lvl || g.class_or_year === s.lvl) && (!s.sec || g.section === s.sec)); }
+  function draw() {
+    const levels = s.inst ? tally(groups.filter(g => g.institution === s.inst), g => g.class_or_year, g => g.parent_count) : [];
+    const secs = s.lvl ? tally(groups.filter(g => g.institution === s.inst && g.class_or_year === s.lvl), g => g.section, g => g.parent_count) : [];
+    const tpl = templates.find(t => t.id === s.tpl);
+    const ag = s.inst ? audienceGroups() : [];
+    const parents = ag.reduce((n, g) => n + g.parent_count, 0), wa = ag.reduce((n, g) => n + g.whatsapp_count, 0);
+    let body = '';
+    if (tpl) { body = tpl.body; placeholders(tpl.body).forEach(n => { body = body.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); }
+    const est = info.cost_per_whatsapp || info.cost_per_call ? parents ? 'Estimate: ' + money(wa * info.cost_per_whatsapp + (parents - wa) * info.cost_per_call, info.currency) + ' (rough; plus calls to parents who don\u2019t answer)' : '' : '';
+    main().innerHTML = '<div class="head"><div><h1>New campaign</h1><p class="sub" style="margin:0">Pick who gets it, which template, and fill in the values.</p></div></div>' +
+      '<div class="card"><h2>1. Audience</h2><div class="row">' +
+      '<div><label>School / college</label><select id="a-inst"><option value="">Choose…</option>' + insts.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === s.inst)).join('') + '</select></div>' +
+      '<div><label>Class / year</label><select id="a-lvl" ' + (s.inst ? '' : 'disabled') + '><option value="">Everyone</option>' + levels.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === s.lvl)).join('') + '</select></div>' +
+      '<div><label>Section</label><select id="a-sec" ' + (s.lvl ? '' : 'disabled') + '><option value="">All sections</option>' + secs.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === s.sec)).join('') + '</select></div></div>' +
+      (s.inst ? '<p class="muted small" style="margin:10px 0 0">' + parents + ' parents (' + wa + ' on WhatsApp, ' + (parents - wa) + (info.voice_enabled ? ' phone only' : ' without WhatsApp, not messaged') + '). Opted-out parents are skipped.</p>' : '') + '</div>' +
+      '<div class="card"><h2>2. Template</h2><select id="t-sel"><option value="">Choose an approved template…</option>' + templates.map(t => opt(t.id, t.name + ' (' + t.language + ')', t.id === s.tpl)).join('') + '</select>' +
+      '<p class="muted small">Each parent gets the version in their language when an approved template with the same name exists in it.</p>' +
+      (tpl ? '<div class="grid2">' + placeholders(tpl.body).map(n => '<div><label>{{' + n + '}} ' + esc((tpl.variable_names || [])[n - 1] || '') + '</label><input data-var="' + n + '" value="' + esc(s.values[n] || '') + '" placeholder="' + esc((tpl.sample_values || {})[n] || '') + '"></div>').join('') + '</div>' +
+        '<label>Preview</label><div class="wa">' + esc(body) + (tpl.has_confirm_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div>' : '') + '</div>' +
+      '<div id="err"></div>' +
+      '<div class="row"><div>' + (est ? '<span class="muted small">' + esc(est) + '</span>' : '') + '</div><button class="btn primary" id="send" ' + (s.inst && tpl ? '' : 'disabled') + '>Send campaign</button></div>';
+    $('#a-inst').onchange = e => { s.inst = e.target.value; s.lvl = ''; s.sec = ''; draw(); };
+    $('#a-lvl').onchange = e => { s.lvl = e.target.value; s.sec = ''; draw(); };
+    $('#a-sec').onchange = e => { s.sec = e.target.value; draw(); };
+    $('#t-sel').onchange = e => { s.tpl = e.target.value; s.values = {}; draw(); };
+    $$('[data-var]').forEach(i => i.oninput = () => { s.values[i.dataset.var] = i.value; const t2 = templates.find(t => t.id === s.tpl); let b = t2.body; placeholders(b).forEach(n => { b = b.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); $('.wa').firstChild.textContent = b; });
+    $('#send').onclick = confirmSend;
+  }
+  function confirmSend() {
+    const tpl = templates.find(t => t.id === s.tpl), ag = audienceGroups();
+    const parents = ag.reduce((n, g) => n + g.parent_count, 0);
+    const m = modal('<h2>Send to ' + parents + ' parents?</h2><p>This sends <b>' + esc(tpl.name) + '</b> now. It can\u2019t be undone, though you can stop a campaign that is still sending.</p><div class="actions"><button class="btn" id="no">Cancel</button><button class="btn primary" id="yes">Send</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async () => {
+      m.close();
+      try {
+        const r = await call('campaigns.create', { template_id: s.tpl, institution: s.inst, class_or_year: s.lvl || null, section: s.sec || null, variables: s.values });
+        await driveSend(r.id, r.message_count);
+        go('campaigns/detail', r.id);
+      } catch (e) { $('#err').innerHTML = errorsHtml(e); }
+    };
+  }
+  draw();
+};
+
+// Apps Script has no background jobs: the page keeps asking the server to send the next batch.
+async function driveSend(id, total) {
+  const m = modal('<div class="busy-modal">' + stringSvg('md') + '<h2>Sending\u2026</h2><p id="p" class="muted" style="margin:0">Starting\u2026</p><div class="meter"><i id="mt"></i></div><p class="small muted" style="margin:0">Keep this tab open. If you close it, the background job finishes the rest within about 10\u201320 minutes.</p></div>');
+  m.dataset.noesc = '1';
+  try {
+    for (;;) {
+      const r = await call('campaigns.sendBatch', id);
+      $('#p', m).textContent = r.remaining ? r.remaining + (total ? ' of ' + total : '') + ' still to send\u2026' : 'Done.';
+      if (total) $('#mt', m).style.width = Math.round((total - r.remaining) / total * 100) + '%';
+      if (!r.remaining || r.status === 'cancelled') break;
+    }
+    await showDone(m, total ? 'Sent to ' + total + ' parents' : 'Sent', 'Delivery and replies will appear on the campaign page.');
+  } finally { m.close(); }
+}
+
+// ---------- campaigns: detail ----------
+async function campaignDetail(id, statusFilter) {
+  const c = await call('campaigns.get', id, statusFilter || null);
+  const active = statusFilter ? GROUPS.find(g => g.statuses.indexOf(statusFilter) >= 0) : null;
+  let group = (window.__grp && window.__grp.id === id) ? window.__grp.key : '';
+  let msgs = c.messages;
+  if (group) { const g = GROUPS.find(x => x.key === group); msgs = msgs.filter(m => g.statuses.indexOf(m.status) >= 0); }
+  window.__grp = { id, key: group };
+  const live = c.status === 'sending' || (c.counts.queued + c.counts.sent + c.counts.delivered + c.counts.read) > 0;
+  main().innerHTML = noticesHtml() +
+    '<p><a href="#" data-go="campaigns">\u2190 Campaigns</a></p>' +
+    '<div class="head"><div><h1>' + esc(c.audience) + '</h1><p class="sub" style="margin:0">' + esc(c.template_name) + ' \u00b7 ' + esc(fmtDate(c.created_at)) + ' \u00b7 by ' + esc(c.sender || '') + ' \u00b7 ' + badge(c.status) + '</p></div>' +
+    '<div class="row" style="flex:0 0 auto">' +
+    (c.status === 'sending' || c.status === 'failed' ? '<button class="btn primary" id="cont">Continue sending</button>' : '') +
+    (c.counts.failed ? '<button class="btn" id="retry">Retry failed (' + c.counts.failed + ')</button>' : '') +
+    (c.status !== 'cancelled' ? '<button class="btn danger" id="stop">Stop campaign</button>' : '') +
+    '<button class="btn" id="export">' + (c.archive_url ? 'Update Drive export' : 'Export to Drive') + '</button>' +
+    (live ? '<span class="live"><i></i>Updating every 30 s</span>' : '') + '<button class="btn" id="refresh">Refresh</button></div></div>' +
+    (c.archive_url ? '<div class="alert ok">Archived to Google Drive on ' + esc(fmtDate(c.archived_at)) + ': <a href="' + esc(c.archive_url) + '" target="_blank" rel="noopener">open the sheet</a></div>' : '') +
+    '<div class="card">' + progressBar(c.counts) + '<div class="chips"><span class="chip ' + (group ? '' : 'on') + '" data-g="">All (' + c.counts.total + ')</span>' +
+    GROUPS.map(g => { const n = gcount(c.counts, g.statuses); return n ? '<span class="chip ' + (group === g.key ? 'on' : '') + '" data-g="' + g.key + '">' + g.label + ' (' + n + ')</span>' : ''; }).join('') + '</div>' +
+    '<div class="wa" style="margin-top:6px">' + esc(templateText(c)) + (c.template_has_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div></div>' +
+    '<div class="card scroll">' + (msgs.length ? '<table><thead><tr><th>Parent</th><th>Child</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
+      msgs.map(m => '<tr class="click" data-m="' + m.id + '"><td>' + esc(m.parents.parent_name) + '</td><td>' + esc(m.parents.child_name || '') + '</td><td>' + esc(m.parents.phone_e164) + '</td><td>' + badge(m.status) + '</td><td class="small muted">' + esc(messageDetails(m)) + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="empty">No parents in this view.</div>') + '</div>';
+
+  const reload = () => { loading(); return campaignDetail(id); };
+  $$('[data-g]').forEach(ch => ch.onclick = () => { window.__grp = { id, key: ch.dataset.g }; reload(); });
+  $('#refresh').onclick = reload;
+  clearInterval(state.refresh);
+  if (live) state.refresh = setInterval(() => {   // quiet auto-refresh: only when the tab is visible, no window is open and you are at the top
+    if (document.hidden || $('.overlay') || window.scrollY > 80 || state.view !== 'campaigns/detail') return;
+    campaignDetail(id, statusFilter).then(settleView).catch(() => {});
+  }, 30000);
+  $('#export').onclick = async e => {
+    e.target.disabled = true; e.target.textContent = 'Exporting\u2026';
+    try { const r = await call('campaigns.export', id); toast('Saved to Drive: ' + r.name); reload(); } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Export to Drive'; }
+  };
+  if ($('#cont')) $('#cont').onclick = async () => { try { await driveSend(id); } catch (e) { toast(e.message, true); } reload(); };
+  if ($('#retry')) $('#retry').onclick = async () => {
+    try { const r = await call('campaigns.retryFailed', id); toast(r.retried + ' messages queued again'); await driveSend(id); } catch (e) { toast(e.message, true); } reload();
+  };
+  if ($('#stop')) $('#stop').onclick = () => {
+    const m = modal('<h2>Stop this campaign?</h2><p>Unsent messages are cancelled and no more fallback calls are placed. Messages already delivered stay, and parents can still reply.</p><div class="actions"><button class="btn" id="no">Keep going</button><button class="btn danger" id="yes">Stop campaign</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async () => { m.close(); try { const r = await call('campaigns.cancel', id); toast(r.stopped + ' messages cancelled'); } catch (e) { toast(e.message, true); } reload(); };
+  };
+  $$('[data-m]').forEach(tr => tr.onclick = () => messagePanel(c, c.messages.find(m => m.id === tr.dataset.m), reload));
+}
+function templateText(c) {
+  let b = c.template_body || '';
+  Object.keys(c.variables || {}).forEach(k => { b = b.split('{{' + k + '}}').join(c.variables[k]); });
+  return b;
+}
+function messageDetails(m) {
+  if (m.status === 'confirmed' || m.status === 'declined') return m.confirmed_via === 'admin' ? 'Recorded by an admin' : m.confirmed_via === 'voice' ? 'Answered on the phone call' : 'Answered on WhatsApp';
+  if (m.status === 'cancelled') return m.parents.opted_out ? 'Parent opted out' : 'Campaign stopped before sending';
+  if (m.call_status) return 'Call: ' + m.call_status.replace('-', ' ');
+  if (m.call_requested_at) return 'Calling now';
+  if (m.call_due_at) return (m.wa_error ? m.wa_error + ' ' : m.parents.has_whatsapp ? '' : 'No WhatsApp. ') + 'Call ' + callTime(m.call_due_at);
+  if (m.wa_error) return m.wa_error;
+  if (m.status === 'read') return 'Read, no reply yet';
+  return '';
+}
+function eventSummary(e) {
+  const p = e.payload || {};
+  switch (e.source) {
+    case 'whatsapp_status': return 'WhatsApp: ' + (p.MessageStatus || '?') + (p.ErrorCode ? ' (error ' + p.ErrorCode + ')' : '');
+    case 'whatsapp_inbound': return (p.ButtonPayload ? 'Tapped' : 'Replied') + ' \u201c' + (p.Body || '') + '\u201d' + (p.recovered ? ' (recovered)' : '');
+    case 'voice_gather': return 'Pressed ' + (p.Digits || 'nothing');
+    case 'voice_status': return 'Call ' + (p.CallStatus || '?') + (p.CallDuration ? ', ' + p.CallDuration + ' s' : '');
+    case 'admin': return 'Marked ' + p.outcome + ' by ' + p.by;
+    case 'cron': return p.error ? 'Error: ' + p.error : p.recheck_status ? 'Status re-checked with Twilio: ' + p.recheck_status : 'Background job';
+    default: return e.source;
+  }
+}
+async function messagePanel(c, m, reload) {
+  const o = modal('<h2>' + esc(m.parents.parent_name) + '</h2><p class="muted">' + esc(m.parents.child_name ? 'Parent of ' + m.parents.child_name + ' \u00b7 ' : '') + esc(m.parents.phone_e164) + ' \u00b7 ' + esc(m.parents.language) + '</p>' +
+    '<p>' + badge(m.status) + ' <span class="muted small">' + esc(messageDetails(m)) + '</span></p>' +
+    (m.reply_text ? '<p><b>Reply:</b> \u201c' + esc(m.reply_text) + '\u201d <span class="muted small">' + esc(timeAgo(m.replied_at)) + '</span></p>' : '') +
+    (m.status !== 'cancelled' ? '<div class="row" style="flex:0 0 auto"><button class="btn" data-r="confirmed">Mark confirmed</button><button class="btn" data-r="declined">Mark declined</button></div><p class="small muted">Use after speaking to the parent personally.</p>' : '') +
+    '<h2 style="margin-top:14px">Timeline</h2><ul class="tl" id="tl"><li class="muted">Loading\u2026</li></ul><div class="actions"><button class="btn" id="x">Close</button></div>');
+  $('#x', o).onclick = o.close;
+  $$('[data-r]', o).forEach(b => b.onclick = async () => { try { await call('messages.resolve', m.id, b.dataset.r); toast('Saved'); o.close(); reload(); } catch (e) { toast(e.message, true); } });
+  try {
+    const ev = await call('messages.events', m.id);
+    $('#tl', o).innerHTML = ev.length ? ev.map(e => '<li><span class="muted small">' + esc(fmtDate(e.created_at)) + '</span> \u2014 ' + esc(eventSummary(e)) + '</li>').join('') : '<li class="muted">No events yet.</li>';
+  } catch (e) { $('#tl', o).innerHTML = '<li>' + esc(e.message) + '</li>'; }
+}
+
+// ---------- parents ----------
+const SAMPLE_CSV = 'parent_name,phone,child_name,institution,institution_type,class_or_year,section,language,has_whatsapp\n' +
+  'Asha Rao,98765 43210,Riya Rao,Sunrise Public School,school,7,B,hi,yes\n' +
+  'Vikram Shah,+919812345678,Aarav Shah,Sunrise Public School,school,7,B,en,no\n' +
+  'Meera Iyer,98400 12345,Karthik Iyer,City Engineering College,college,2,,ta,yes\n';
+
+views.parents = async function () {
+  const all = await call('parents.list', {});
+  const f = { institution: '', class_or_year: '', section: '', hard: false, q: '' };
+  let result = window.__uploadResult || null; window.__uploadResult = null;
+
+  function filtered() {
+    return all.filter(p => (!f.institution || p.institution === f.institution) && (!f.class_or_year || p.class_or_year === f.class_or_year) &&
+      (!f.section || p.section === f.section) && (!f.hard || (p.stats.responded === 0 && p.stats.total >= 2)) &&
+      (!f.q || (p.parent_name + ' ' + (p.child_name || '') + ' ' + p.phone_e164).toLowerCase().indexOf(f.q.toLowerCase()) >= 0));
+  }
+  function draw() {
+    const insts = tally(all, p => p.institution, () => 1);
+    const levels = f.institution ? tally(all.filter(p => p.institution === f.institution), p => p.class_or_year, () => 1) : [];
+    const secs = f.class_or_year ? tally(all.filter(p => p.institution === f.institution && p.class_or_year === f.class_or_year), p => p.section, () => 1) : [];
+    const rows = filtered();
+    main().innerHTML = noticesHtml() +
+      '<div class="head"><div><h1>Parents</h1><p class="sub" style="margin:0">' + all.length + ' parents. Upload a CSV to add or update them.</p></div>' +
+      '<div class="row" style="flex:0 0 auto"><button class="btn" id="sample">Sample CSV</button><button class="btn" id="move">Move group</button><button class="btn danger" id="delgrp">Delete group</button>' +
+      '<button class="btn primary" id="upload">Upload CSV</button><input type="file" id="file" accept=".csv,text/csv" style="display:none"></div></div>' +
+      (result ? '<div class="card"><b>' + result.inserted + ' added, ' + result.updated + ' updated, ' + result.rejected + ' rejected.</b>' +
+        (result.errors.length ? '<div class="scroll"><table><thead><tr><th>Row</th><th>Phone</th><th>Reason</th></tr></thead><tbody>' + result.errors.map(e => '<tr><td>' + e.row + '</td><td>' + esc(e.phone || '') + '</td><td>' + esc(e.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') + '</div>' : '') +
+      '<div class="card"><div class="row">' +
+      '<div><label>Search</label><input id="q" value="' + esc(f.q) + '" placeholder="Name or phone"></div>' +
+      '<div><label>School / college</label><select id="f-inst"><option value="">All</option>' + insts.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === f.institution)).join('') + '</select></div>' +
+      '<div><label>Class / year</label><select id="f-lvl" ' + (f.institution ? '' : 'disabled') + '><option value="">All</option>' + levels.map(i => opt(i.value, i.value, i.value === f.class_or_year)).join('') + '</select></div>' +
+      '<div><label>Section</label><select id="f-sec" ' + (f.class_or_year ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === f.section)).join('') + '</select></div></div>' +
+      '<label class="inline"><input type="checkbox" id="hard" ' + (f.hard ? 'checked' : '') + '> Hard to reach (answered none of their last 2+ messages)</label></div>' +
+      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Parent</th><th>Child</th><th>Phone</th><th>Group</th><th>Lang</th><th>Answered</th><th></th></tr></thead><tbody>' +
+        rows.map(p => '<tr class="click" data-p="' + p.id + '"><td>' + esc(p.parent_name) + '</td><td>' + esc(p.child_name || '') + '</td><td>' + esc(p.phone_e164) + '</td><td class="small">' + esc(p.institution) + ' \u00b7 ' + (p.institution_type === 'college' ? 'Year ' : 'Class ') + esc(p.class_or_year) + (p.section ? ' ' + esc(p.section) : '') + '</td><td>' + esc(p.language) + '</td>' +
+          '<td>' + p.stats.responded + ' / ' + p.stats.total + (p.stats.flagged ? ' <span class="badge b-flagged">' + p.stats.flagged + '</span>' : '') + '</td><td class="small muted">' + (p.opted_out ? '<span class="badge b-cancelled">Opted out</span> ' : '') + (p.has_whatsapp ? '' : 'No WhatsApp') + '</td></tr>').join('') + '</tbody></table>'
+        : (all.length ? '<div class="empty">No parents match these filters.</div>' : emptyState('users', 'No parents yet', 'Upload a CSV with each parent\u2019s name, phone, school and class. Use Sample CSV to see the format.', { label: 'Upload CSV', attr: 'data-click="#upload"' }))) + '</div>';
+    $('#q').oninput = e => { f.q = e.target.value; const pos = e.target.selectionStart; draw(); const q = $('#q'); q.focus(); q.setSelectionRange(pos, pos); };
+    $('#f-inst').onchange = e => { f.institution = e.target.value; f.class_or_year = ''; f.section = ''; draw(); };
+    $('#f-lvl').onchange = e => { f.class_or_year = e.target.value; f.section = ''; draw(); };
+    $('#f-sec').onchange = e => { f.section = e.target.value; draw(); };
+    $('#hard').onchange = e => { f.hard = e.target.checked; draw(); };
+    $('#sample').onclick = () => { const m = modal('<h2>Sample CSV</h2><p class="small muted">Copy into a file named parents.csv (UTF-8). Required: parent_name, phone, institution, class_or_year.</p><pre id="csv">' + esc(SAMPLE_CSV) + '</pre><div class="actions"><button class="btn" id="cp">Copy</button><button class="btn" id="x">Close</button></div>'); $('#x', m).onclick = m.close; $('#cp', m).onclick = () => { navigator.clipboard.writeText(SAMPLE_CSV).then(() => toast('Copied'), () => toast('Select and copy manually', true)); }; };
+    $('#upload').onclick = () => $('#file').click();
+    $('#file').onchange = e => {
+      const file = e.target.files[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = async () => {
+        try { window.__uploadResult = await call('parents.upload', String(r.result)); toast('Upload finished'); go('parents'); }
+        catch (err) { toast(err.message, true); }
+      };
+      r.readAsText(file, 'utf-8');
+    };
+    $('#move').onclick = () => groupDialog(all, false);
+    $('#delgrp').onclick = () => groupDialog(all, true);
+    $$('[data-p]').forEach(tr => tr.onclick = () => parentDrawer(all.find(p => p.id === tr.dataset.p)));
+  }
+  draw();
+};
+
+function groupDialog(all, isDelete) {
+  const s = { inst: '', lvl: '', sec: '' };
+  const m = modal('<div id="gd"></div>');
+  function draw() {
+    const insts = tally(all, p => p.institution, () => 1);
+    const levels = s.inst ? tally(all.filter(p => p.institution === s.inst), p => p.class_or_year, () => 1) : [];
+    const secs = s.lvl ? tally(all.filter(p => p.institution === s.inst && p.class_or_year === s.lvl), p => p.section, () => 1) : [];
+    const n = all.filter(p => p.institution === s.inst && (!s.lvl || p.class_or_year === s.lvl) && (!s.sec || p.section === s.sec)).length;
+    $('#gd', m).innerHTML = '<h2>' + (isDelete ? 'Delete group' : 'Move group (year-end promotion)') + '</h2>' +
+      (isDelete ? '<p class="muted small">Removes every parent in the group and their message history.</p>' : '<p class="muted small">Move highest class first (e.g. 7 \u2192 8 before 6 \u2192 7).</p>') +
+      '<label>School / college</label><select id="g-i"><option value="">Choose\u2026</option>' + insts.map(i => opt(i.value, i.value, i.value === s.inst)).join('') + '</select>' +
+      '<label>Class / year' + (isDelete ? ' (empty = whole institution)' : '') + '</label><select id="g-l" ' + (s.inst ? '' : 'disabled') + '><option value="">' + (isDelete ? 'All' : 'Choose\u2026') + '</option>' + levels.map(i => opt(i.value, i.value, i.value === s.lvl)).join('') + '</select>' +
+      '<label>Section (empty = all)</label><select id="g-s" ' + (s.lvl ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === s.sec)).join('') + '</select>' +
+      (isDelete ? '' : '<div class="grid2"><div><label>New class / year</label><input id="g-nl"></div><div><label>New section (only when moving one section)</label><input id="g-ns"></div></div>') +
+      (s.inst ? '<p class="small">' + n + ' parents affected.</p>' : '') + '<div id="gerr"></div>' +
+      '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn ' + (isDelete ? 'danger' : 'primary') + '" id="go" ' + (s.inst ? '' : 'disabled') + '>' + (isDelete ? 'Delete' : 'Move') + '</button></div>';
+    $('#g-i', m).onchange = e => { s.inst = e.target.value; s.lvl = ''; s.sec = ''; draw(); };
+    $('#g-l', m).onchange = e => { s.lvl = e.target.value; s.sec = ''; draw(); };
+    $('#g-s', m).onchange = e => { s.sec = e.target.value; draw(); };
+    $('#x', m).onclick = m.close;
+    $('#go', m).onclick = async () => {
+      if (isDelete && !confirm('Delete ' + n + ' parents permanently?')) return;
+      try {
+        const r = isDelete ? await call('parents.deleteGroup', { institution: s.inst, class_or_year: s.lvl || null, section: s.sec || null })
+          : await call('parents.move', { source: { institution: s.inst, class_or_year: s.lvl, section: s.sec || null }, class_or_year: $('#g-nl', m).value, section: $('#g-ns', m).value });
+        toast((isDelete ? r.deleted + ' deleted' : r.moved + ' moved')); m.close(); go('parents');
+      } catch (e) { $('#gerr', m).innerHTML = errorsHtml(e); }
+    };
+  }
+  draw();
+}
+
+function parentDrawer(p) {
+  const m = modal('<h2>Edit parent</h2><div class="grid2">' +
+    '<div><label>Parent name</label><input id="e-name" value="' + esc(p.parent_name) + '"></div><div><label>Phone</label><input id="e-phone" value="' + esc(p.phone_e164) + '"></div>' +
+    '<div><label>Child name</label><input id="e-child" value="' + esc(p.child_name || '') + '"></div><div><label>Language</label><input id="e-lang" value="' + esc(p.language) + '"></div>' +
+    '<div><label>School / college</label><input id="e-inst" value="' + esc(p.institution) + '"></div>' +
+    '<div><label>Type</label><select id="e-type">' + opt('school', 'School', p.institution_type === 'school') + opt('college', 'College', p.institution_type === 'college') + '</select></div>' +
+    '<div><label>Class / year</label><input id="e-lvl" value="' + esc(p.class_or_year) + '"></div><div><label>Section</label><input id="e-sec" value="' + esc(p.section || '') + '"></div></div>' +
+    '<label class="inline"><input type="checkbox" id="e-wa" ' + (p.has_whatsapp ? 'checked' : '') + '> Has WhatsApp</label>' +
+    '<label class="inline"><input type="checkbox" id="e-out" ' + (p.opted_out ? 'checked' : '') + '> Opted out (no messages or calls)</label><div id="perr"></div>' +
+    '<div class="actions"><button class="btn danger" id="del" style="margin-right:auto">Delete</button><button class="btn" id="x">Close</button><button class="btn primary" id="save">Save</button></div>' +
+    '<h2 style="margin-top:14px">History</h2><ul class="tl" id="hist"><li class="muted">Loading\u2026</li></ul>');
+  $('#x', m).onclick = m.close;
+  $('#save', m).onclick = async () => {
+    try {
+      await call('parents.update', p.id, { parent_name: $('#e-name', m).value, phone: $('#e-phone', m).value, child_name: $('#e-child', m).value, institution: $('#e-inst', m).value,
+        institution_type: $('#e-type', m).value, class_or_year: $('#e-lvl', m).value, section: $('#e-sec', m).value, language: $('#e-lang', m).value,
+        has_whatsapp: $('#e-wa', m).checked, opted_out: $('#e-out', m).checked });
+      toast('Saved'); m.close(); go('parents');
+    } catch (e) { $('#perr', m).innerHTML = errorsHtml(e); }
+  };
+  $('#del', m).onclick = async () => {
+    if (!confirm('Delete ' + p.parent_name + ' and their history?')) return;
+    try { await call('parents.delete', p.id); toast('Deleted'); m.close(); go('parents'); } catch (e) { toast(e.message, true); }
+  };
+  call('parents.history', p.id).then(h => {
+    $('#hist', m).innerHTML = h.length ? h.map(x => '<li>' + badge(x.status) + ' ' + esc(x.campaigns.templates.name || '') + ' \u00b7 ' + esc(x.campaigns.audience || '') + ' <span class="muted small">' + esc(timeAgo(x.updated_at)) + '</span>' + (x.reply_text ? '<br><span class="small muted">\u201c' + esc(x.reply_text) + '\u201d</span>' : '') + '</li>').join('') : '<li class="muted">No messages sent yet.</li>';
+  }).catch(e => { $('#hist', m).innerHTML = '<li>' + esc(e.message) + '</li>'; });
+}
+
+// ---------- templates ----------
+const META_WORDS = { received: 'Received by Twilio, not yet passed to WhatsApp', pending: 'Under review at WhatsApp', paused: 'Paused by WhatsApp', disabled: 'Disabled by WhatsApp' };
+function metaNote(t) {
+  if (t.status !== 'pending_meta') return '';
+  const st = String(t.meta_status || '').toLowerCase(), hrs = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / 3600000);
+  return '<div class="small muted">' + esc(META_WORDS[st] || (st ? 'Status: ' + st : 'Waiting for the first check')) + ' \u00b7 submitted ' + esc(timeAgo(t.updated_at)) + (t.meta_checked_at ? ' \u00b7 checked ' + esc(timeAgo(t.meta_checked_at)) : '') + '</div>' +
+    (hrs >= 48 ? '<div class="small" style="color:var(--warn)">Longer than the usual 48 hours. Check the template in Twilio (Messaging, Content Template Builder) or ask Twilio support.</div>' : '');
+}
+function syncSummary(r) {
+  return r.checked + ' checked, ' + r.approved + ' approved, ' + r.rejected + ' rejected' + (r.waiting && r.waiting.length ? '. Still waiting: ' + r.waiting.map(w => w.name + ' (' + (META_WORDS[w.status] || w.status).toLowerCase() + ')').join(', ') : '');
+}
+
+views.templates = async function () {
+  await loadNotices();
+  const list = await call('templates.list', null);
+  main().innerHTML = noticesHtml() +
+    '<div class="head"><div><h1>Templates</h1><p class="sub" style="margin:0">WhatsApp requires Meta-approved templates. Approval usually takes minutes to a day.</p></div>' +
+    '<div class="row" style="flex:0 0 auto"><button class="btn" id="imp">Import from Twilio</button><button class="btn" id="sync">Check status now</button><button class="btn primary" data-go="templates/new">Request template</button></div></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Lang</th><th>Category</th><th>Status</th><th>Message</th><th></th></tr></thead><tbody>' +
+      list.map(t => '<tr><td><b>' + esc(t.name) + '</b></td><td>' + esc(t.language) + '</td><td class="small">' + esc(t.category) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
+        '<td class="small" style="max-width:340px">' + esc(t.body) + (t.has_confirm_buttons ? '<div class="muted">Buttons: Confirm / Can\u2019t attend</div>' : '') + '</td>' +
+        '<td style="white-space:nowrap">' + (t.status === 'approved' ? '<button class="btn small" data-use="' + t.id + '">Use in campaign</button> ' : '') +
+        (t.status === 'draft' ? '<button class="btn small" data-retry="' + t.id + '">Retry submit</button>' : '') +
+        (t.status === 'approved' || t.status === 'rejected' ? '<button class="btn small" data-edit="' + t.id + '">Edit &amp; resubmit</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card">' + emptyState('file', 'No templates yet', 'WhatsApp needs an approved template for every message. Request one, or import the ones already in Twilio.', { label: 'Request template', attr: 'data-go="templates/new"' }) + '</div>');
+  $('#sync').onclick = async () => { try { const r = await call('templates.sync'); toast(syncSummary(r)); await views.templates(); } catch (e) { toast(e.message, true); } };
+  $('#imp').onclick = async e => {
+    e.target.disabled = true; e.target.textContent = 'Importing\u2026';
+    try {
+      const r = await call('templates.import');
+      const m = modal('<h2>Import from Twilio</h2><p><b>' + r.imported + ' imported</b> of ' + r.found + ' templates found.</p>' +
+        (r.imported ? '<p class="small muted">Placeholder labels are shown as \u201cvalue 1\u201d, \u201cvalue 2\u201d\u2026 The sample values come from Twilio.</p>' : '') +
+        (r.skipped.length ? '<div class="scroll"><table><thead><tr><th>Template</th><th>Note</th></tr></thead><tbody>' + r.skipped.map(s => '<tr><td>' + esc(s.name) + '</td><td class="small">' + esc(s.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') +
+        '<div class="actions"><button class="btn primary" id="x">Close</button></div>');
+      $('#x', m).onclick = () => { m.close(); views.templates(); };
+    } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Import from Twilio'; }
+  };
+  $$('[data-use]').forEach(b => b.onclick = () => go('campaigns/new', b.dataset.use));
+  $$('[data-retry]').forEach(b => b.onclick = async () => { try { await call('templates.retrySubmit', b.dataset.retry); toast('Submitted'); views.templates(); } catch (e) { toast(e.message, true); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => go('templates/new', JSON.stringify(list.find(t => t.id === b.dataset.edit))));
+};
+
+views['templates/new'] = async function (editJson) {
+  const old = editJson ? JSON.parse(editJson) : null;
+  const s = old ? { name: old.name, language: old.language, category: old.category, body: old.body, buttons: old.has_confirm_buttons, names: (old.variable_names || []).slice(), samples: Object.assign({}, old.sample_values) }
+    : { name: '', language: 'en', category: 'UTILITY', body: 'Dear parent, the PTM is on {{1}} at {{2}} in {{3}}. Please confirm your attendance.', buttons: true, names: ['date', 'time', 'venue'], samples: { 1: '12 Nov', 2: '10 AM', 3: 'Hall A' } };
+  function vars() {
+    const ph = placeholders(s.body);
+    $('#vars').innerHTML = ph.length ? '<label>Placeholders</label>' + ph.map(n => '<div class="row" style="margin-bottom:6px"><input data-n="' + n + '" value="' + esc(s.names[n - 1] || '') + '" placeholder="Label for {{' + n + '}}, e.g. date"><input data-s="' + n + '" value="' + esc(s.samples[n] || '') + '" placeholder="Sample value for {{' + n + '}}"></div>').join('') : '';
+    $$('[data-n]').forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; });
+    $$('[data-s]').forEach(i => i.oninput = () => { s.samples[i.dataset.s] = i.value; });
+  }
+  main().innerHTML = '<p><a href="#" data-go="templates">\u2190 Templates</a></p><div class="head"><h1>' + (old ? 'Edit &amp; resubmit' : 'Request template') + '</h1></div>' +
+    (old ? '<div class="alert info">Submitted templates can\u2019t be edited in WhatsApp, so this creates a new version of <b>' + esc(old.name) + '</b>.</div>' : '') +
+    '<div class="card"><div class="grid2"><div><label>Name (lowercase, digits, underscores)</label><input id="t-name" ' + (old ? 'disabled' : '') + ' value="' + esc(s.name) + '" placeholder="ptm_reminder"></div>' +
+    '<div><label>Language</label><input id="t-lang" ' + (old ? 'disabled' : '') + ' value="' + esc(s.language) + '" placeholder="en, hi, ta"></div></div>' +
+    '<label>Category</label><select id="t-cat">' + opt('UTILITY', 'Utility (notices, reminders)', s.category === 'UTILITY') + opt('MARKETING', 'Marketing', s.category === 'MARKETING') + '</select>' +
+    '<label>Message body</label><textarea id="t-body">' + esc(s.body) + '</textarea>' +
+    '<p class="small muted">Use {{1}}, {{2}} \u2026 for values. Don\u2019t start or end with a placeholder or put two next to each other. Max 1024 characters.</p><div id="vars"></div>' +
+    '<label class="inline"><input type="checkbox" id="t-btn" ' + (s.buttons ? 'checked' : '') + '> Add Confirm / Can\u2019t attend buttons</label></div><div id="err"></div>' +
+    '<div class="row"><div></div><button class="btn primary" id="submit">Submit to WhatsApp</button></div>';
+  vars();
+  $('#t-body').oninput = e => { s.body = e.target.value; vars(); };
+  $('#t-cat').onchange = e => { s.category = e.target.value; };
+  $('#t-btn').onchange = e => { s.buttons = e.target.checked; };
+  $('#submit').onclick = async e => {
+    e.target.disabled = true;
+    const ph = placeholders(s.body);
+    const body = { name: $('#t-name').value.trim(), language: $('#t-lang').value.trim(), category: s.category, body: s.body,
+      variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}), has_confirm_buttons: s.buttons };
+    try {
+      if (old) await call('templates.resubmit', old.id, body); else await call('templates.create', body);
+      toast('Submitted. Status: pending Meta'); go('templates');
+    } catch (err) { $('#err').innerHTML = errorsListHtml(err); e.target.disabled = false; }
+  };
+};
+
+// ---------- landing, divisions, switch ----------
+// ---------- theme: auto / light / dark ----------
+const THEME_ORDER = ['auto', 'light', 'dark'];
+const storedTheme = () => { try { return localStorage.getItem('ektara-theme') || 'auto'; } catch (e) { return 'auto'; } };
+function applyTheme(mode) {
+  const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.mode = mode;
+  $('#themebtn').innerHTML = ICON[mode === 'auto' ? 'auto' : mode === 'dark' ? 'moon' : 'sun'];
+  $('#themebtn').title = 'Theme: ' + mode + ' (click to change)'; $('#f-theme').textContent = 'Theme: ' + label(mode);
+}
+function cycleTheme() {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(storedTheme()) + 1) % 3];
+  try { localStorage.setItem('ektara-theme', next); } catch (e) { /* storage can be blocked */ }
+  applyTheme(next); toast('Theme: ' + label(next));
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener && matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (storedTheme() === 'auto') applyTheme('auto'); });
+$('#themebtn').onclick = cycleTheme; $('#f-theme').onclick = cycleTheme; applyTheme(storedTheme());
+
+const REQUESTED = '<?= requestedDivision ?>';
+const LOGO = '<?!= logo ?>';
+const CLIENT_BUILD = '20261107-1230';
+const BOOT_WATCH_MS = window.__bootWatchMs || 15000;
+const IC = {
+  parent: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="16" cy="12" r="5"/><path d="M7 38v-8a9 9 0 0 1 18 0v8"/><circle cx="35" cy="22" r="4"/><path d="M28 38v-5a7 7 0 0 1 14 0v5"/></svg>',
+  donor: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 31s-9-5.6-9-12a5.2 5.2 0 0 1 9-3.4A5.2 5.2 0 0 1 33 19c0 6.4-9 12-9 12z"/><path d="M5 34h8l7 4h12l11-6a3 3 0 0 0-3-5l-8 3"/></svg>',
+  overview: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 40V8"/><path d="M8 40h34"/><rect x="14" y="24" width="6" height="12" rx="1"/><rect x="25" y="16" width="6" height="20" rx="1"/><rect x="36" y="28" width="6" height="8" rx="1"/></svg>',
+  lock: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="10" y="21" width="28" height="19" rx="4"/><path d="M16 21v-5a8 8 0 0 1 16 0v5"/></svg>'
+};
+const DIVS = {
+  parent: { title: 'Parent Communication', color: 'var(--parent)', desc: 'Manage parent engagement, programme communication and follow-ups.', cta: 'Enter Parent Workspace' },
+  donor: { title: 'Donor Communication', color: 'var(--donor)', desc: 'Manage donor engagement, campaigns and communication.', cta: 'Enter Donor Workspace' },
+  overview: { title: 'Organisation Overview', color: 'var(--overview)', desc: 'Consolidated high-level view of Parent and Donor Communication, with cross-division metrics and administrative insights.', cta: 'Open Organisation Overview' }
+};
+const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const accent = id => 'style="--acc:' + DIVS[id].color + '"';
+
+function setShell(id) {
+  document.documentElement.dataset.div = id || '';
+  $('#divbadge').hidden = !id;
+  if (id) { const b = $('#divbadge'); b.textContent = DIVS[id].title; }
+  $('#nav').hidden = id !== 'parent';
+  $('#dnav').hidden = id !== 'donor';
+  const canSwitch = !!(id && state.session && state.session.entries.length >= 2);
+  $('#switch').hidden = !canSwitch; $('#f-switch').hidden = !canSwitch;
+  $('#foot-div').textContent = id ? DIVS[id].title : 'Parent and donor communication';
+}
+function updateAdminBtn() {
+  const b = $('#adminbtn'), admin = !!(state.session && state.session.can_admin);
+  b.hidden = !admin; if (admin) b.innerHTML = ICON.cog;
+}
+$('#adminbtn').onclick = () => go('admin/users');
+function goHome() {
+  const d = state.division;
+  if (d === 'parent') go('campaigns'); else if (d === 'donor') go('donor/home'); else if (d === 'overview') go('overview/home'); else showLanding({});
+}
+// A visible warning, for administrators only, when files come from different versions or the page is older than the server code.
+function checkBuilds(s) {
+  const old = $('#buildwarn'); if (old) old.remove();
+  if (!s || !s.can_admin) return;
+  let msg = '';
+  if (s.build_problem) msg = 'Some files in the Apps Script project are out of date: ' + s.build_problem + '. Replace every file from the latest zip, then deploy a new version.';
+  else if (s.server_build && s.server_build !== CLIENT_BUILD) msg = 'The page (build ' + CLIENT_BUILD + ') and the server code (build ' + s.server_build + ') are different versions. Deploy a new version of the admin app, then hard-refresh.';
+  if (!msg) return;
+  const d = document.createElement('div'); d.id = 'buildwarn'; d.className = 'alert'; d.setAttribute('role', 'alert');
+  d.style.cssText = 'max-width:1120px;margin:12px auto 0;width:calc(100% - 40px)'; d.textContent = msg;
+  document.querySelector('header').after(d);
+}
+function initChrome() {
+  $('#foot-build').textContent = 'Build ' + CLIENT_BUILD;
+  const email = (state.session && state.session.user && state.session.user.email) || $('#foot-user').textContent || '';
+  const name = (state.session && state.session.user && state.session.user.full_name) || email;
+  $('#avatar').textContent = (name.trim().charAt(0) || '?').toUpperCase(); $('#foot-user').textContent = email;
+  $('#foot-year').textContent = new Date().getFullYear();
+}
+$('#switch').onclick = () => showLanding({});
+$('#f-switch').onclick = () => { window.scrollTo({ top: 0 }); showLanding({}); };
+
+function showExpired() {
+  if ($('#expired')) return;
+  const o = document.createElement('div'); o.className = 'overlay'; o.setAttribute('role', 'alertdialog'); o.setAttribute('aria-labelledby', 'expired');
+  o.innerHTML = '<div class="modal"><h2 id="expired">Your session has expired</h2><p>Please reload the page and sign in again.</p><div class="actions"><button class="btn primary" id="rl">Reload</button></div></div>';
+  document.body.appendChild(o);
+  $('#rl', o).onclick = () => { try { window.top.location.reload(); } catch (e) { location.reload(); } };
+  $('#rl', o).focus();
+}
+
+// Permissions come from the server on every visit and on every switch; nothing is cached or assumed here.
+async function showLanding(opts) {
+  opts = opts || {};
+  clearTimeout(state.timer);
+  $$('.overlay').forEach(o => { if (!$('#expired', o)) o.remove(); });
+  setShell(null);
+  main().innerHTML = '<div class="spinner" role="status">Checking your access\u2026</div>';
+  let s;
+  try { s = await call('session'); }
+  catch (e) { s = { mode: 'denied', entries: [], user: {}, reason: e.message }; }
+  state.session = s; updateAdminBtn(); checkBuilds(s);
+  let notice = opts.notice || '';
+  if (!notice && !state.reqHandled && REQUESTED && s.entries.indexOf(REQUESTED) < 0) notice = 'You don\u2019t have access to ' + DIVS[REQUESTED].title + '.';
+  state.reqHandled = true;
+  const note = notice ? '<div class="alert" role="alert" style="max-width:520px;margin:0 auto 18px">' + esc(notice) + '</div>' : '';
+  const m = main();
+
+  if (s.mode === 'denied') {
+    m.innerHTML = '<div class="landing" style="--acc:var(--bad)">' + note +
+      '<div class="lico pop">' + IC.lock + '</div><h1 class="rise d1" tabindex="-1" id="land-h">Access denied</h1>' +
+      '<p class="lead rise d2">' + esc(s.reason || 'Your account isn\u2019t authorised for any workspace yet.') + '</p>' +
+      '<p class="sub2 rise d3">Ask an administrator to grant you access, then check again.</p>' +
+      '<p class="rise d3" style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" id="again">Check again</button>' +
+      (s.contact && s.user && s.user.email ? '<a class="btn" href="mailto:' + esc(s.contact) + '?subject=' + encodeURIComponent('Please give me access to Ek Tara Communications') + '&body=' + encodeURIComponent('Hello,\n\nPlease give this Google account access: ' + s.user.email + '\n\nThank you') + '" style="text-decoration:none">Email an administrator</a>' : '') + '</p></div>';
+    $('#again').onclick = () => showLanding({});
+    $('#land-h').focus();
+    return;
+  }
+
+  if (s.mode === 'single') {
+    const id = s.entries[0], d = DIVS[id], dur = reducedMotion() ? 1400 : 2400;
+    m.innerHTML = '<div class="landing" ' + accent(id) + ' role="status" aria-live="polite">' + note +
+      '<div class="lico pop">' + IC[id] + '</div>' +
+      '<h1 class="rise d1" tabindex="-1" id="land-h">Welcome back!</h1>' +
+      '<p class="lead rise d2">You\u2019re authorised to access ' + esc(d.title) + '.</p>' +
+      '<div class="prog rise d3" style="--dur:' + (dur / 1000) + 's"><i></i></div>' +
+      '<p class="sub2 rise d3">Taking you to your ' + esc(d.title) + ' workspace...</p>' +
+      '<p class="rise d4" style="margin-top:14px"><button class="btn small" id="now">Continue now</button></p></div>';
+    $('#now').onclick = () => enterDivision(id);
+    $('#land-h').focus();
+    state.timer = setTimeout(() => enterDivision(id), dur);
+    return;
+  }
+
+  const both = s.entries.indexOf('parent') >= 0 && s.entries.indexOf('donor') >= 0;
+  m.innerHTML = '<div class="landing">' + note +
+    '<h1 class="rise d1" tabindex="-1" id="land-h">Welcome back!</h1>' +
+    '<p class="lead rise d2">Choose a workspace to continue.</p>' +
+    (s.user.role === 'admin' && both ? '<span class="pill rise d3">Administrator \u00b7 you have access to both workspaces</span>' : '') +
+    '<div class="dcards" role="group" aria-label="Workspaces">' + s.entries.map((id, i) =>
+      '<button class="dcard rise d' + Math.min(4, i + 2) + '" ' + accent(id) + ' data-div="' + id + '">' +
+      '<span class="lico" aria-hidden="true">' + IC[id] + '</span>' +
+      '<h2>' + esc(DIVS[id].title) + (s.last_division === id ? '<span class="tag">Last used</span>' : '') + '</h2>' +
+      '<p>' + esc(DIVS[id].desc) + '</p><span class="go">' + esc(DIVS[id].cta) + '</span></button>').join('') + '</div></div>';
+  $$('.dcard').forEach(b => b.onclick = () => enterDivision(b.dataset.div));
+  const first = $('.dcard[data-div="' + s.last_division + '"]') || $('.dcard');
+  if (first) first.focus(); else $('#land-h').focus();
+}
+
+// Permissions are checked again here, so a switch never uses stale access.
+async function enterDivision(id) {
+  clearTimeout(state.timer);
+  let s;
+  try { s = await call('session'); } catch (e) { return showLanding({ notice: e.message }); }
+  state.session = s; updateAdminBtn();
+  if (s.entries.indexOf(id) < 0) return showLanding({ notice: 'Your access to ' + DIVS[id].title + ' has changed.' });
+  call('prefs.setDivision', id).catch(() => {}); // remembering a choice never grants access
+  state.division = id;
+  setShell(id);
+  if (id === 'parent') { loadNotices(); go('campaigns'); }
+  else if (id === 'donor') go('donor/home');
+  else go('overview/home');
+}
+
+views['overview/home'] = async function () {
+  const o = await call('overview.summary'), p = o.parent, d = o.donor, tile = (n, t) => '<div class="tile"><b data-count="' + (n || 0) + '">' + (n || 0) + '</b>' + t + '</div>';
+  main().innerHTML = '<div class="head"><div><h1>Organisation Overview</h1><p class="sub">Totals only. No names, phone numbers or messages are shown here, and you do not need access to either department\u2019s data to see them.</p></div>' +
+    (o.updated_at ? '<span class="muted small">Updated ' + esc(timeAgo(o.updated_at)) + '</span>' : '') + '</div>' +
+    '<div class="card"><h2>Parent Communication</h2>' + (p ? '<div class="tiles">' + tile(p.parents, 'Parents') + tile(p.campaigns, 'Campaigns') + tile(p.messages, 'Messages sent') + tile(p.answered, 'Answered') + '</div>' : '<p class="muted">No totals yet. They appear after the next background run (every 10 minutes).</p>') + '</div>' +
+    '<div class="card"><h2>Donor Communication</h2>' + (d ? '<div class="tiles">' + tile(d.donors, 'Donors and leads') + tile(d.opted_in, 'WhatsApp opt-in') + tile(d.campaigns, 'Campaigns') + tile(d.donations, 'Donations recorded') + tile(d.messages_sent_7d, 'Messages sent, last 7 days') + tile(d.held, 'Held by the rules') + tile(d.failed, 'Failed') + '</div>' +
+      '<div class="chips" style="margin-bottom:0">' + Object.keys(d.segments || {}).map(c => '<span class="chip" style="cursor:default" tabindex="-1">' + esc(c) + ' ' + d.segments[c] + '</span>').join('') + '</div>' : '<p class="muted">No totals yet. They appear after the next background run (every 10 minutes).</p>') + '</div>';
+};
+
+// ================= Donor Communication workspace =================
+const segTag = c => '<span class="seg ' + (String(c).charAt(0) === 'P' ? 'p' : '') + '" title="' + esc((state.dmeta && state.dmeta.segments[c]) || '') + '">' + esc(c) + '</span>';
+const DONOR_CSV = 'name,contact number,email,segment,city,language,whatsapp_opt_in,reference,donor status,reporting frequency,next report due,owner,owner_email\n' +
+  'Sunrise Textiles Pvt Ltd,91 99999 00001,csr@sunrise.example.com,D1,Kolkata,en,yes,Board member referral,Corporate CSR,Quarterly,2026-12-01,Rita Das,rita@ektara.org\\n' +
+  'Ananya Roy,99999 00004,,P2,Mumbai,en,yes,Website enquiry,Individual,,,,\\n';
+async function dmeta() { if (!state.dmeta) state.dmeta = await call('donor.meta'); return state.dmeta; }
+const fld = (label, html) => '<div><label>' + label + '</label>' + html + '</div>';
+const val = id => { const e = $('#' + id); return e ? e.value : ''; };
+
+async function driveDonorSend(title) {
+  const m = modal('<div class="busy-modal">' + stringSvg('md') + '<h2>' + (title || 'Sending\u2026') + '</h2><p id="p" class="muted" style="margin:0">Working\u2026</p><p class="small muted" style="margin:0">Rules applied: WhatsApp opt-in, one update per donor per 7 days, the donor\u2019s working hours.</p></div>');
+  m.dataset.noesc = '1';
+  let total = 0;
+  try {
+    for (let i = 0; i < 30; i++) {
+      const r = await call('donor.dispatch'); total += r.sent;
+      $('#p', m).textContent = total + ' sent' + (r.remaining ? ', ' + r.remaining + ' more\u2026' : '.');
+      if (!r.remaining) break;
+    }
+    await showDone(m, total ? total + ' sent' : 'Nothing to send right now', total ? 'Check the Queue to see the status of each message.' : 'Messages held by the rules stay in the Queue with the reason.');
+  } finally { m.close(); }
+  return total;
+}
+
+// ---------- overview ----------
+views['donor/home'] = async function () {
+  await dmeta();
+  const d = await call('donor.home');
+  if (!d.ready) {
+    main().innerHTML = '<div class="head"><div><h1>Donor Communication</h1><p class="sub">One step before you can start.</p></div></div><div class="alert info"><b>' + esc(d.message) + '</b>' + (d.problem ? '<br>' + esc(d.problem) : '') + (d.build_problem ? '<br><b>Some files in the project are out of date:</b> ' + esc(d.build_problem) + '. Replace every file from the latest zip.' : '') + '</div>' +
+      '<div class="card">' + (d.can_setup ? '<p style="margin-top:0">You are the project owner, so you can do this now. It creates the donor Google Sheet and its tabs and moves any older donor data into it. It is safe to run again.</p><button class="btn primary" id="setupnow">Set up now</button>'
+        : '<p style="margin:0">Only the project owner can do this. Ask them to open this screen and click <b>Set up now</b>, or to run <b>setup</b> in the Apps Script editor.</p>') + '</div>';
+    const sb = $('#setupnow'); if (sb) sb.onclick = async () => { try { await call('admin.setup'); state.dmeta = null; toast('Setup finished'); views['donor/home'](); } catch (e) { toast(e.message, true); } };
+    return;
+  }
+  const q = d.queue;
+  main().innerHTML = '<div class="head"><div><h1>Donor Communication</h1><p class="sub" style="margin:0">' + d.total + ' contacts \u00b7 ' + d.opted_in + ' with WhatsApp opt-in</p></div>' +
+    '<button class="btn primary" id="sendnow">Send waiting messages now</button></div>' +
+    '<div class="card"><h2>Contacts by segment</h2><div class="tiles">' + Object.keys(state.dmeta.segments).map(c => '<div class="tile" style="cursor:pointer" data-seg="' + c + '"><b data-count="' + (d.segments[c] || 0) + '">' + (d.segments[c] || 0) + '</b>' + segTag(c) + ' ' + esc(state.dmeta.segments[c]) + '</div>').join('') + '</div></div>' +
+    '<div class="card"><h2>Needs attention</h2>' +
+    (d.drafts.length ? '<p><span class="badge b-held">' + d.drafts.length + ' to approve</span> ' + d.drafts.map(x => esc(x.name) + ' <span class="muted small">(' + esc(x.trigger) + (x.send_on ? ', send ' + esc(x.send_on) : '') + ')</span>').join('; ') + ' <a href="#" data-go="donor/broadcasts">Review</a></p>' : '') +
+    (d.awaiting_trustee ? '<p><span class="badge b-held">' + d.awaiting_trustee + ' trustee leads (P1)</span> waiting for the trustee to confirm before their welcome goes out. <a href="#" data-go="donor/donors">Open donors</a></p>' : '') +
+    (q.held ? '<p><span class="badge b-held">' + q.held + ' held</span> by the rules (opt-in, 7-day cap, working hours, missing template or value). <a href="#" data-go="donor/queue">See why</a></p>' : '') +
+    (q.failed ? '<p><span class="badge b-failed">' + q.failed + ' failed</span> <a href="#" data-go="donor/queue">Retry</a></p>' : '') +
+    (d.missing_templates.length ? '<p class="muted">No approved template yet for: ' + d.missing_templates.map(esc).join(', ') + '. <a href="#" data-go="donor/templates">Templates</a></p>' : '') +
+    (!d.drafts.length && !d.awaiting_trustee && !q.held && !q.failed ? '<p class="muted">Nothing needs attention.</p>' : '') + '</div>' +
+    '<div class="card"><h2>Programme reports due in the next 14 days</h2>' + (d.reports_due.length ? '<div class="scroll"><table><thead><tr><th>Donor</th><th>Due</th><th>Report link</th><th>Owner email</th></tr></thead><tbody>' +
+      d.reports_due.map(r => '<tr class="click" data-d="' + r.id + '"><td>' + esc(r.name) + '</td><td>' + esc(r.next_report_due) + '</td><td>' + (r.has_link ? 'added' : '<span style="color:var(--bad)">missing</span>') + '</td><td>' + (r.has_owner_email ? 'set' : '<span style="color:var(--bad)">missing</span>') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted">None.</p>') + '</div>' +
+    '<p class="small muted">Sent in the last 7 days: ' + q.sent_7d + ' \u00b7 waiting: ' + q.queued + '</p>';
+  $('#sendnow').onclick = async () => { const n = await driveDonorSend(); toast(n + ' messages sent'); views['donor/home'](); };
+  $$('[data-seg]').forEach(t => t.onclick = () => { state.donorFilter = { segment: t.dataset.seg }; go('donor/donors'); });
+  $$('[data-d]').forEach(t => t.onclick = () => donorModal(t.dataset.d));
+};
+
+// ---------- donors ----------
+views['donor/donors'] = async function () {
+  await dmeta();
+  const f = Object.assign({ segment: '', q: '', optin: '' }, state.donorFilter || {}); state.donorFilter = null;
+  let upload = window.__donorUpload || null; window.__donorUpload = null;
+  const all = await call('donor.donors.list', {});
+  function draw() {
+    const rows = all.filter(d => (!f.segment || d.segment === f.segment) && (!f.q || (d.name + ' ' + d.phone_e164 + ' ' + (d.city || '') + ' ' + (d.email || '')).toLowerCase().indexOf(f.q.toLowerCase()) >= 0) &&
+      (!f.optin || (f.optin === 'yes' ? d.whatsapp_opt_in && !d.opted_out : !(d.whatsapp_opt_in && !d.opted_out))));
+    main().innerHTML = '<div class="head"><div><h1>Donors</h1><p class="sub" style="margin:0">' + all.length + ' contacts. Segments change over time and every change is kept.</p></div>' +
+      '<div class="row" style="flex:0 0 auto"><button class="btn" id="hours">Working hours</button><button class="btn" id="sample">Sample CSV</button><button class="btn" id="up">Upload CSV</button><input type="file" id="file" accept=".csv,text/csv" style="display:none"><button class="btn primary" id="add">Add donor</button></div></div>' +
+      (upload ? '<div class="card"><b>' + upload.inserted + ' added, ' + upload.updated + ' updated, ' + upload.rejected + ' rejected.</b>' + (upload.errors.length ? '<div class="scroll"><table><thead><tr><th>Row</th><th>Phone</th><th>Reason</th></tr></thead><tbody>' + upload.errors.map(e => '<tr><td>' + e.row + '</td><td>' + esc(e.phone || '') + '</td><td>' + esc(e.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') + '</div>' : '') +
+      '<div class="card"><div class="row">' + fld('Search', '<input id="q" value="' + esc(f.q) + '" placeholder="Name, phone, city">') +
+      fld('Segment', '<select id="fs"><option value="">All</option>' + Object.keys(state.dmeta.segments).map(c => opt(c, c + ' \u00b7 ' + state.dmeta.segments[c], c === f.segment)).join('') + '</select>') +
+      fld('WhatsApp opt-in', '<select id="fo">' + opt('', 'Any', !f.optin) + opt('yes', 'Opted in', f.optin === 'yes') + opt('no', 'Not opted in / opted out', f.optin === 'no') + '</select>') + '</div></div>' +
+      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Name</th><th>Segment</th><th>Phone</th><th>City</th><th>WhatsApp</th><th>Last message</th></tr></thead><tbody>' + rows.map(d =>
+        '<tr class="click" data-d="' + d.id + '"><td>' + esc(d.name) + '<div class="small muted">' + esc(d.contact_type || '') + '</div></td><td>' + segTag(d.segment) + '</td><td>' + esc(d.phone_e164) + '</td><td>' + esc(d.city || '') + '</td>' +
+        '<td>' + (d.opted_out ? '<span class="badge b-cancelled">Opted out</span>' : d.whatsapp_opt_in ? '<span class="badge b-approved">Opted in</span>' : '<span class="badge b-held">No opt-in</span>') + '</td>' +
+        '<td class="small muted">' + (d.last_message_at ? esc(label((d.last_message_type || '').replace(/_/g, ' ')) + ' \u00b7 ' + timeAgo(d.last_message_at)) : '') + '</td></tr>').join('') + '</tbody></table>' : (all.length ? '<div class="empty">No donors match these filters.</div>' : emptyState('heart', 'No donors yet', 'Add a donor or upload a CSV. Each row needs a name, phone and segment.', { label: 'Upload CSV', attr: 'data-click="#up"' }))) + '</div>';
+    $('#q').oninput = e => { f.q = e.target.value; const p = e.target.selectionStart; draw(); const q = $('#q'); q.focus(); q.setSelectionRange(p, p); };
+    $('#fs').onchange = e => { f.segment = e.target.value; draw(); }; $('#fo').onchange = e => { f.optin = e.target.value; draw(); };
+    $('#add').onclick = () => donorForm(null);
+    $('#hours').onclick = hoursForm;
+    $('#sample').onclick = () => { const m = modal('<h2>Sample CSV</h2><p class="small muted">Required: name, phone (or contact number) and segment (P1 to P5, D1, D2). Other columns are optional. Opt-in is only recorded when the column says yes.</p><pre>' + esc(DONOR_CSV) + '</pre><div class="actions"><button class="btn" id="x">Close</button></div>'); $('#x', m).onclick = m.close; };
+    $('#up').onclick = () => $('#file').click();
+    $('#file').onchange = e => { const file = e.target.files[0]; if (!file) return; const r = new FileReader(); r.onload = async () => { try { window.__donorUpload = await call('donor.donors.import', String(r.result)); toast('Upload finished'); go('donor/donors'); } catch (err) { toast(err.message, true); } }; r.readAsText(file, 'utf-8'); };
+    $$('[data-d]').forEach(tr => tr.onclick = () => donorModal(tr.dataset.d));
+  }
+  draw();
+};
+
+function donorFormHtml(d) {
+  d = d || {}; const m = state.dmeta, v = k => esc(d[k] == null ? '' : d[k]);
+  return '<div class="grid2">' + fld('Name', '<input id="f-name" value="' + v('name') + '">') + fld('Phone (WhatsApp)', '<input id="f-phone" value="' + v('phone_e164') + '" placeholder="98765 43210 or +44\u2026">') +
+    fld('Email', '<input id="f-email" value="' + v('email') + '">') + fld('Type', '<input id="f-type" list="types" value="' + v('contact_type') + '"><datalist id="types"><option>Individual<option>Corporate CSR<option>Foundation<option>Trust</datalist>') +
+    fld('City (sets sending hours)', '<input id="f-city" list="cities" value="' + v('city') + '"><datalist id="cities">' + m.cities.map(c => '<option>' + esc(c.city) + '</option>').join('') + '</datalist>') + fld('Language', '<input id="f-lang" value="' + (d.language || 'en') + '">') +
+    fld('Segment', '<select id="f-seg">' + Object.keys(m.segments).map(c => opt(c, c + ' \u00b7 ' + m.segments[c], c === (d.segment || 'P2'))).join('') + '</select>') + fld(d.id ? 'Reason for a segment change' : 'How they came to us', '<input id="f-ref" value="' + (d.id ? '' : v('source_note')) + '">') +
+    fld('Contact owner', '<input id="f-owner" value="' + v('owner_name') + '">') + fld('Owner email (gets report reminders)', '<input id="f-oemail" value="' + v('owner_email') + '">') +
+    fld('Reporting frequency', '<select id="f-freq">' + ['', 'Monthly', 'Quarterly', 'Half-yearly', 'Annual'].map(x => opt(x, x || 'None', x === (d.reporting_frequency || ''))).join('') + '</select>') + fld('Next report due', '<input id="f-due" type="date" value="' + v('next_report_due') + '">') +
+    fld('Report link (for the due date)', '<input id="f-link" value="' + v('report_link') + '">') + fld('Last donation date', '<input id="f-last" type="date" value="' + v('last_donation_date') + '">') +
+    fld('Project', '<input id="f-proj" value="' + v('project') + '">') + fld('Core programme', '<input id="f-prog" value="' + v('core_programme') + '">') + '</div>' + fld('Notes', '<textarea id="f-notes" style="min-height:60px">' + v('notes') + '</textarea>');
+}
+function donorFormBody(d) {
+  return { name: val('f-name'), phone: val('f-phone'), email: val('f-email'), contact_type: val('f-type'), city: val('f-city'), language: val('f-lang'), segment: val('f-seg'),
+    segment_reason: d && d.id ? val('f-ref') : '', source_note: d && d.id ? d.source_note : val('f-ref'), owner_name: val('f-owner'), owner_email: val('f-oemail'), reporting_frequency: val('f-freq'),
+    next_report_due: val('f-due'), report_link: val('f-link'), last_donation_date: val('f-last'), project: val('f-proj'), core_programme: val('f-prog'), notes: val('f-notes'),
+    status: d && d.status, current_status: d && d.current_status, prior_year_amount: d && d.prior_year_amount, timeline_start: d && d.timeline_start, timeline_end: d && d.timeline_end };
+}
+async function donorForm(d) {
+  await dmeta();
+  const m = modal('<h2>' + (d ? 'Edit donor' : 'Add donor') + '</h2>' + donorFormHtml(d) + '<div id="ferr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.donors.save', d ? d.id : null, donorFormBody(d)); toast('Saved'); m.close(); go('donor/donors'); } catch (e) { $('#ferr', m).innerHTML = errorsHtml(e); } };
+}
+
+async function hoursForm() {
+  await dmeta();
+  const rows = state.dmeta.cities.map(c => Object.assign({}, c));
+  const m = modal('<div id="hf"></div>', true);
+  function draw() {
+    $('#hf', m).innerHTML = '<h2>Working hours by city</h2><p class="small muted">Donor messages are only sent between these hours in the donor\u2019s city. Cities not listed use the default, ' + '09:00 to 19:00 in the organisation\u2019s time zone. Messages triggered outside the hours wait for the next morning.</p>' +
+      '<datalist id="tzs"><option>Asia/Kolkata<option>Asia/Dubai<option>Asia/Singapore<option>Europe/London<option>America/New_York<option>America/Los_Angeles<option>Australia/Sydney</datalist>' +
+      '<div class="scroll"><table><thead><tr><th>City</th><th>Time zone</th><th>Starts</th><th>Ends</th><th></th></tr></thead><tbody>' + rows.map((r, i) =>
+        '<tr><td><input data-i="' + i + '" data-f="city" value="' + esc(r.city) + '"></td><td><input data-i="' + i + '" data-f="timezone" list="tzs" value="' + esc(r.timezone) + '"></td><td><input data-i="' + i + '" data-f="start" type="time" value="' + esc(r.start) + '"></td><td><input data-i="' + i + '" data-f="end" type="time" value="' + esc(r.end) + '"></td><td><button class="btn small danger" data-rm="' + i + '">Remove</button></td></tr>').join('') + '</tbody></table></div>' +
+      '<p><button class="btn small" id="addrow">Add a city</button></p><div id="herr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save working hours</button></div>';
+    $$('input[data-i]', m).forEach(i => i.oninput = () => { rows[i.dataset.i][i.dataset.f] = i.value; });
+    $$('[data-rm]', m).forEach(b => b.onclick = () => { rows.splice(Number(b.dataset.rm), 1); draw(); });
+    $('#addrow', m).onclick = () => { rows.push({ city: '', timezone: 'Asia/Kolkata', start: '09:00', end: '19:00' }); draw(); };
+    $('#x', m).onclick = m.close;
+    $('#s', m).onclick = async () => { try { await call('donor.cities.save', rows); state.dmeta = null; toast('Working hours saved'); m.close(); } catch (e) { $('#herr', m).innerHTML = errorsHtml(e); } };
+  }
+  draw();
+}
+
+async function donorModal(id) {
+  await dmeta();
+  const x = await call('donor.donors.get', id), d = x.donor;
+  const m = modal('<h2>' + esc(d.name) + ' ' + segTag(d.segment) + '</h2><p class="muted">' + esc(d.phone_e164) + (d.email ? ' \u00b7 ' + esc(d.email) : '') + (d.city ? ' \u00b7 ' + esc(d.city) : '') + '</p>' +
+    '<p>' + (d.opted_out ? '<span class="badge b-cancelled">Opted out</span>' : d.whatsapp_opt_in ? '<span class="badge b-approved">WhatsApp opt-in recorded</span> <span class="small muted">' + esc(d.opt_in_source || '') + '</span>' : '<span class="badge b-held">No WhatsApp opt-in: nothing will be sent</span>') + '</p>' +
+    '<div class="row" style="flex:0 0 auto;margin-bottom:10px"><button class="btn" id="don">Record donation</button>' +
+    (d.whatsapp_opt_in && !d.opted_out ? '<button class="btn" id="oi0">Remove opt-in</button>' : '<button class="btn" id="oi1">Record WhatsApp opt-in</button>') +
+    (d.opted_out ? '<button class="btn" id="oo0">Allow messages again</button>' : '<button class="btn" id="oo1">Mark opted out</button>') +
+    (d.segment === 'P1' && !d.trustee_confirmed ? '<button class="btn" id="tc">Trustee confirmed</button>' : '') + '<button class="btn danger" id="del">Delete</button></div>' +
+    '<h2>Segment history</h2><ul class="tl">' + x.history.map(h => '<li>' + (h.from_segment ? segTag(h.from_segment) + ' \u2192 ' : 'Added as ') + segTag(h.to_segment) + ' <span class="muted small">' + esc(fmtDate(h.changed_at)) + ' \u00b7 ' + esc(h.reason || '') + '</span></li>').join('') + '</ul>' +
+    '<h2 style="margin-top:12px">Donations</h2>' + (x.donations.length ? '<ul class="tl">' + x.donations.map(n => '<li style="display:flex;gap:8px;align-items:center"><span style="flex:1">' + esc(inrFmt(n.amount)) + ' on ' + esc(n.donated_on) + (n.campaign_name ? ' \u00b7 ' + esc(n.campaign_name) : '') + (n.note ? ' <span class="muted small">' + esc(n.note) + '</span>' : '') + '</span><button class="btn small" data-ed="' + n.id + '">Edit</button><button class="btn small danger" data-dd="' + n.id + '">Delete</button></li>').join('') + '</ul>' : '<p class="muted small">None recorded.</p>') +
+    '<h2 style="margin-top:12px">Messages</h2>' + (x.messages.length ? '<ul class="tl">' + x.messages.map(g => '<li>' + badge(g.status) + ' ' + esc(g.message_type.replace(/_/g, ' ')) + ' <span class="muted small">' + esc(g.trigger || '') + ' \u00b7 ' + esc(timeAgo(g.updated_at)) + (g.hold_reason ? ' \u00b7 ' + esc(g.hold_reason) : '') + (g.wa_error ? ' \u00b7 ' + esc(g.wa_error) : '') + '</span>' + (g.reply_text ? '<br><span class="small muted">\u201c' + esc(g.reply_text) + '\u201d</span>' : '') + '</li>').join('') + '</ul>' : '<p class="muted small">None yet.</p>') +
+    '<h2 style="margin-top:12px">Details</h2>' + donorFormHtml(d) + '<div id="ferr"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn primary" id="s">Save details</button></div>', true);
+  const done = msg => { toast(msg); m.close(); go('donor/donors'); };
+  const act = (sel, fn) => { const b = $(sel, m); if (b) b.onclick = async () => { try { await fn(); } catch (e) { toast(e.message, true); } }; };
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.donors.save', d.id, donorFormBody(d)); done('Saved'); } catch (e) { $('#ferr', m).innerHTML = errorsHtml(e); } };
+  act('#oi1', async () => { await call('donor.donors.setOptIn', d.id, true); done('Opt-in recorded'); });
+  act('#oi0', async () => { await call('donor.donors.setOptIn', d.id, false); done('Opt-in removed'); });
+  act('#oo1', async () => { if (confirm('Mark ' + d.name + ' as opted out? Waiting messages are cancelled.')) { await call('donor.donors.setOptedOut', d.id, true); done('Marked opted out'); } });
+  act('#oo0', async () => { await call('donor.donors.setOptedOut', d.id, false); done('Updated'); });
+  act('#tc', async () => { await call('donor.donors.confirmTrustee', d.id); m.close(); await driveDonorSend('Sending welcome\u2026'); go('donor/donors'); });
+  act('#del', async () => { if (confirm('Delete ' + d.name + ' with their history, donations and messages?')) { await call('donor.donors.delete', d.id); done('Deleted'); } });
+  act('#don', async () => donationForm(d, m));
+  $$('[data-ed]', m).forEach(b => b.onclick = () => donationForm(d, m, x.donations.find(n => n.id === b.dataset.ed)));
+  $$('[data-dd]', m).forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this donation? The donor\u2019s last-donation date is recalculated. Their segment is not changed.')) return;
+    try { const r = await call('donor.donations.delete', b.dataset.dd); toast('Donation deleted' + (r.thank_you_cancelled ? ' and its unsent thank-you cancelled' : r.thank_you_already_sent ? '. Its thank-you had already been sent' : '')); m.close(); donorModal(d.id); } catch (e) { toast(e.message, true); }
+  });
+}
+const inrFmt = n => '\u20b9' + Number(n).toLocaleString('en-IN');
+
+async function donationForm(d, parentModal, ex) {
+  const camps = await call('donor.campaigns.list');
+  const m = modal('<h2>' + (ex ? 'Edit donation from ' : 'Record donation from ') + esc(d.name) + '</h2><div class="grid2">' + fld('Amount (\u20b9)', '<input id="a-amt" inputmode="decimal" value="' + esc(ex ? ex.amount : '') + '">') + fld('Date', '<input id="a-date" type="date" value="' + esc(ex ? ex.donated_on : new Date().toISOString().slice(0, 10)) + '">') + '</div>' +
+    fld('Campaign (leave empty for a general or programme gift)', '<select id="a-camp"><option value="">None</option>' + camps.map(c => opt(c.id, c.name, ex && ex.campaign_id === c.id)).join('') + '</select>') + fld('Note', '<input id="a-note" value="' + esc(ex && ex.note ? ex.note : '') + '">') +
+    (ex ? '<p class="small muted">Changing a donation does not change the donor\u2019s segment or resend the thank-you.</p>' : '<p class="small muted">A thank-you goes out within 48 hours. ' + (d.segment.charAt(0) === 'P' ? 'This is their first donation, so they move from ' + esc(d.segment) + ' to a donor segment and their potential-donor updates stop.' : '') + '</p>') + '<div id="aerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">' + (ex ? 'Save changes' : 'Record') + '</button></div>');
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => {
+    const body = { amount: val('a-amt'), donated_on: val('a-date'), campaign_id: val('a-camp') || null, note: val('a-note') };
+    try {
+      if (ex) { await call('donor.donations.update', ex.id, body); m.close(); parentModal.close(); toast('Donation updated'); donorModal(d.id); return; }
+      const r = await call('donor.donations.record', d.id, body); m.close(); parentModal.close(); toast('Donation recorded' + (r.moved ? '; moved to ' + r.segment : '')); await driveDonorSend('Sending thank-you\u2026'); go('donor/donors');
+    } catch (e) { $('#aerr', m).innerHTML = errorsHtml(e); }
+  };
+}
+
+// ---------- donor campaigns ----------
+views['donor/campaigns'] = async function () {
+  const list = await call('donor.campaigns.list');
+  main().innerHTML = '<div class="head"><div><h1>Campaigns</h1><p class="sub" style="margin:0">A campaign\u2019s donors get a midpoint update and a results update, which you approve before they go.</p></div><button class="btn primary" id="new">New campaign</button></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Campaign</th><th>Status</th><th>Midpoint</th><th>Ends</th><th>Donors</th><th>Raised</th><th></th></tr></thead><tbody>' + list.map(c =>
+      '<tr><td><b>' + esc(c.name) + '</b></td><td>' + badge(c.status === 'results_ready' ? 'approved' : c.status === 'running' ? 'sent' : c.status === 'closed' ? 'declined' : 'queued').replace(/>[^<]*<\/span>$/, '>' + esc(label(c.status.replace('_', ' '))) + '</span>') + '</td><td>' + esc(c.midpoint_date || '') + '</td><td>' + esc(c.end_date || '') + '</td><td>' + c.donor_count + '</td><td>' + esc(inrFmt(c.total_raised)) + '</td>' +
+      '<td style="white-space:nowrap"><button class="btn small" data-e="' + c.id + '">Edit</button> ' + (c.status !== 'results_ready' ? '<button class="btn small" data-r="' + c.id + '">Results are ready</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="card">' + emptyState('send', 'No campaigns yet', 'A campaign groups the donors who gave to one appeal, so they get progress and results updates.', { label: 'New campaign', attr: 'data-click="#new"' }) + '</div>');
+  $('#new').onclick = () => campaignForm(null);
+  $$('[data-e]').forEach(b => b.onclick = () => campaignForm(list.find(c => c.id === b.dataset.e)));
+  $$('[data-r]').forEach(b => b.onclick = async () => { if (!confirm('Mark results ready? A results update to this campaign\u2019s donors is drafted for your approval.')) return; try { await call('donor.campaigns.resultsReady', b.dataset.r); toast('Drafted: approve it under Broadcasts'); views['donor/campaigns'](); } catch (e) { toast(e.message, true); } });
+};
+function campaignForm(c) {
+  c = c || {}; const v = k => esc(c[k] == null ? '' : c[k]);
+  const m = modal('<h2>' + (c.id ? 'Edit campaign' : 'New campaign') + '</h2>' + fld('Name', '<input id="c-name" value="' + v('name') + '">') +
+    '<div class="grid2">' + fld('Starts', '<input id="c-start" type="date" value="' + v('start_date') + '">') + fld('Midpoint (when the progress update is drafted)', '<input id="c-mid" type="date" value="' + v('midpoint_date') + '">') + fld('Ends', '<input id="c-end" type="date" value="' + v('end_date') + '">') +
+    fld('Status', '<select id="c-status">' + ['planned', 'running', 'closed'].map(s => opt(s, s, s === (c.status === 'results_ready' ? 'closed' : (c.status || 'planned')))).join('') + '</select>') + '</div>' +
+    fld('Progress text (fills the campaign_progress placeholder)', '<textarea id="c-prog" style="min-height:60px">' + v('progress_text') + '</textarea>') +
+    fld('Results text (fills the campaign_result placeholder)', '<textarea id="c-res" style="min-height:60px">' + v('results_text') + '</textarea>') + '<div id="cerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>');
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.campaigns.save', c.id || null, { name: val('c-name'), start_date: val('c-start'), midpoint_date: val('c-mid'), end_date: val('c-end'), status: c.status === 'results_ready' ? 'results_ready' : val('c-status'), progress_text: val('c-prog'), results_text: val('c-res') }); toast('Saved'); m.close(); views['donor/campaigns'](); } catch (e) { $('#cerr', m).innerHTML = errorsHtml(e); } };
+}
+
+// ---------- donor templates ----------
+views['donor/templates'] = async function () {
+  await dmeta();
+  const list = await call('donor.templates.list');
+  main().innerHTML = '<div class="head"><div><h1>Templates</h1><p class="sub" style="margin:0">Each message type is a WhatsApp template Meta approves once. Placeholder labels such as donor_name or campaign_result fill themselves in.</p></div>' +
+    '<div class="row" style="flex:0 0 auto"><button class="btn" id="imp">Import from Twilio</button><button class="btn" id="sync">Check status now</button><button class="btn primary" id="new">Request template</button></div></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Type</th><th>Lang</th><th>Status</th><th>Message</th><th></th></tr></thead><tbody>' + list.map(t =>
+      '<tr><td><b>' + esc(t.name) + '</b></td><td class="small">' + esc(state.dmeta.message_types[t.message_type] || '(not set)') + (t.source_code ? ' \u00b7 ' + esc(t.source_code) : '') + '</td><td>' + esc(t.language) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
+      '<td class="small" style="max-width:340px">' + esc(t.body) + '<div class="muted">Labels: ' + esc((t.variable_names || []).join(', ')) + '</div></td><td style="white-space:nowrap"><button class="btn small" data-e="' + t.id + '">Type &amp; labels</button>' + (t.status === 'draft' ? ' <button class="btn small" data-retry="' + t.id + '">Retry submit</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="card">' + emptyState('file', 'No donor templates yet', 'Each message type needs one approved WhatsApp template. Request one or import from Twilio.', { label: 'Request template', attr: 'data-click="#new"' }) + '</div>');
+  $('#new').onclick = () => donorTemplateForm();
+  $('#sync').onclick = async () => { try { const r = await call('donor.templates.sync'); toast(syncSummary(r)); views['donor/templates'](); } catch (e) { toast(e.message, true); } };
+  $('#imp').onclick = async e => { e.target.disabled = true; try { const r = await call('donor.templates.import'); toast(r.imported + ' imported of ' + r.found + '. Set each one\u2019s type and labels.'); views['donor/templates'](); } catch (err) { toast(err.message, true); e.target.disabled = false; } };
+  $$('[data-retry]').forEach(b => b.onclick = async () => { try { await call('donor.templates.retrySubmit', b.dataset.retry); toast('Submitted'); views['donor/templates'](); } catch (e) { toast(e.message, true); } });
+  $$('[data-e]').forEach(b => b.onclick = () => donorTemplateMeta(list.find(t => t.id === b.dataset.e)));
+};
+function labelInputs(ph, names, samples, withSamples) {
+  const auto = state.dmeta.auto_labels;
+  return '<datalist id="labels">' + auto.map(a => '<option>' + a + '</option>').join('') + '</datalist>' + ph.map(n => '<div class="row" style="margin-bottom:6px"><input data-n="' + n + '" list="labels" value="' + esc(names[n - 1] || '') + '" placeholder="Label for {{' + n + '}}: pick one that fills itself, or type your own">' + (withSamples ? '<input data-s="' + n + '" value="' + esc((samples || {})[n] || '') + '" placeholder="Sample value for {{' + n + '}}">' : '') + '</div>').join('');
+}
+function donorTemplateForm() {
+  const s = { body: 'Dear {{1}}, thank you for supporting Ek Tara. Your gift of {{2}} will help children learn. We are grateful.', names: ['donor_name', 'amount'], samples: { 1: 'Asha', 2: '\u20b95,000' } };
+  const m = modal('<h2>Request donor template</h2><div class="grid2">' + fld('Name (lowercase, digits, underscores; donor_ is added)', '<input id="t-name" placeholder="donor_thank_you_en">') + fld('Language', '<input id="t-lang" value="en">') +
+    fld('Message type', '<select id="t-type">' + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === 'thank_you')).join('') + '</select>') + fld('Welcome only: written for source', '<select id="t-src">' + opt('', 'Any source', true) + opt('P1', 'P1 trustee lead', false) + opt('P2', 'P2 website lead', false) + opt('P3', 'P3 referral lead', false) + '</select>') + '</div>' +
+    fld('Category', '<select id="t-cat">' + opt('UTILITY', 'Utility', true) + opt('MARKETING', 'Marketing', false) + '</select>') + fld('Message body', '<textarea id="t-body">' + esc(s.body) + '</textarea>') +
+    '<p class="small muted">Use {{1}}, {{2}} \u2026 Don\u2019t start or end with a placeholder. Photos are not supported yet; put a link in a placeholder.</p><div id="vars"></div><div id="terr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Submit to WhatsApp</button></div>', true);
+  const vars = () => { const ph = placeholders(s.body); $('#vars', m).innerHTML = ph.length ? '<label>Placeholders</label>' + labelInputs(ph, s.names, s.samples, true) : ''; $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $$('[data-s]', m).forEach(i => i.oninput = () => { s.samples[i.dataset.s] = i.value; }); };
+  vars(); $('#t-body', m).oninput = e => { s.body = e.target.value; vars(); }; $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async e => {
+    e.target.disabled = true; const ph = placeholders(s.body);
+    try { await call('donor.templates.create', { name: (n => /^donor_/.test(n) ? n : 'donor_' + n)(val('t-name').trim()), language: val('t-lang').trim(), message_type: val('t-type'), source_code: val('t-type') === 'welcome' ? val('t-src') : '', category: val('t-cat'), body: s.body, variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}) }); toast('Submitted. Status: pending Meta'); m.close(); views['donor/templates'](); }
+    catch (err) { $('#terr', m).innerHTML = errorsListHtml(err); e.target.disabled = false; }
+  };
+}
+function donorTemplateMeta(t) {
+  const s = { names: (t.variable_names || []).slice() }, ph = placeholders(t.body);
+  const m = modal('<h2>' + esc(t.name) + '</h2><p class="small muted">This only changes how the app uses the template. Nothing is sent to Twilio or WhatsApp.</p><div class="grid2">' +
+    fld('Message type', '<select id="m-type">' + opt('', 'Choose\u2026', !t.message_type) + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === t.message_type)).join('') + '</select>') +
+    fld('Welcome only: written for source', '<select id="m-src">' + opt('', 'Any source', !t.source_code) + opt('P1', 'P1 trustee lead', t.source_code === 'P1') + opt('P2', 'P2 website lead', t.source_code === 'P2') + opt('P3', 'P3 referral lead', t.source_code === 'P3') + '</select>') + '</div>' +
+    '<div class="card" style="margin:10px 0">' + esc(t.body) + '</div><label>Placeholder labels</label><div id="vars">' + labelInputs(ph, s.names, null, false) + '</div><div id="merr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
+  $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.templates.update', t.id, { message_type: val('m-type'), source_code: val('m-src'), variable_names: ph.map(n => s.names[n - 1] || '') }); toast('Saved'); m.close(); views['donor/templates'](); } catch (e) { $('#merr', m).innerHTML = errorsHtml(e); } };
+}
+
+// ---------- broadcasts (T8 quarterly, T11 special, T12 festive, T4/T5 campaign updates) ----------
+views['donor/broadcasts'] = async function () {
+  await dmeta();
+  const list = await call('donor.broadcasts.list');
+  main().innerHTML = '<div class="head"><div><h1>Broadcasts</h1><p class="sub" style="margin:0">Quarterly updates and campaign updates are drafted for you. Nothing goes out until you approve the text and the list.</p></div><button class="btn primary" id="new">New broadcast</button></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Trigger</th><th>Send on</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>' + list.map(b =>
+      '<tr><td><b>' + esc(b.name) + '</b><div class="small muted">' + esc(b.template_name || 'no template yet') + '</div></td><td>' + esc(b.trigger) + '</td><td>' + esc(b.send_on || '') + '</td><td>' + badge(b.status === 'draft' ? 'held' : b.status === 'approved' ? 'approved' : 'cancelled').replace(/>[^<]*<\/span>$/, '>' + (b.status === 'draft' ? 'Needs approval' : label(b.status)) + '</span>') + '</td>' +
+      '<td class="small">' + (b.status === 'draft' ? '\u2014' : b.counts.sent + ' sent, ' + b.counts.waiting + ' waiting' + (b.counts.failed ? ', ' + b.counts.failed + ' failed' : '')) + '</td>' +
+      '<td style="white-space:nowrap">' + (b.status === 'draft' ? '<button class="btn small primary" data-r="' + b.id + '">Review &amp; approve</button> <button class="btn small danger" data-del="' + b.id + '">Delete</button>' : b.status === 'approved' ? '<button class="btn small danger" data-c="' + b.id + '">Cancel unsent</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="card">' + emptyState('radio', 'No broadcasts yet', 'Quarterly and campaign updates appear here as drafts for you to approve. You can also write a special update.', { label: 'New broadcast', attr: 'data-click="#new"' }) + '</div>');
+  $('#new').onclick = () => broadcastForm({ kind: 'special_update', segments: [], values: {} });
+  $$('[data-r]').forEach(b => b.onclick = () => broadcastForm(list.find(x => x.id === b.dataset.r)));
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('Delete this draft?')) { try { await call('donor.broadcasts.delete', b.dataset.del); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
+  $$('[data-c]').forEach(b => b.onclick = async () => { if (confirm('Cancel the messages that have not been sent yet?')) { try { const r = await call('donor.broadcasts.cancel', b.dataset.c); toast(r.cancelled + ' cancelled'); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
+};
+
+async function broadcastForm(b) {
+  const [tpls, camps] = await Promise.all([call('donor.templates.list'), call('donor.campaigns.list')]);
+  const s = { id: b.id || null, name: b.name || '', kind: b.kind, template_id: b.template_id || '', campaign_id: b.campaign_id || '', segments: (b.segments || []).slice(), send_on: b.send_on || '', event_date: b.event_date || '', values: Object.assign({}, b.values || {}) };
+  const m = modal('<div id="bf"></div>', true);
+  function draw() {
+    const okT = tpls.filter(t => t.status === 'approved' && t.message_type === s.kind), t = tpls.find(x => x.id === s.template_id);
+    const custom = t ? (t.variable_names || []).filter(l => state.dmeta.auto_labels.indexOf(String(l).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')) < 0) : [];
+    $('#bf', m).innerHTML = '<h2>' + (s.id ? 'Review broadcast' : 'New broadcast') + '</h2><div class="grid2">' + fld('Name', '<input id="b-name" value="' + esc(s.name) + '">') +
+      fld('Kind', '<select id="b-kind">' + Object.keys(state.dmeta.kinds).map(k => opt(k, state.dmeta.kinds[k], k === s.kind)).join('') + '</select>') +
+      fld('Template (approved, same type)', '<select id="b-tpl">' + opt('', okT.length ? 'Choose\u2026' : 'No approved template of this type', !s.template_id) + okT.map(x => opt(x.id, x.name + ' (' + x.language + ')', x.id === s.template_id)).join('') + '</select>') +
+      fld('Send on (empty = as soon as approved)', '<input id="b-on" type="date" value="' + esc(s.send_on) + '">') + (s.kind === 'festive_greeting' ? fld('Festival date (greeting is dropped 2 days after)', '<input id="b-ev" type="date" value="' + esc(s.event_date) + '">') : '') +
+      (s.kind === 'campaign_update' || s.campaign_id ? fld('Campaign (everyone who gave to it)', '<select id="b-camp">' + opt('', 'None', !s.campaign_id) + camps.map(c => opt(c.id, c.name, c.id === s.campaign_id)).join('') + '</select>') : '') + '</div>' +
+      '<label>Also send to these segments</label><div class="checks">' + Object.keys(state.dmeta.segments).map(c => '<label><input type="checkbox" data-sg="' + c + '" ' + (s.segments.indexOf(c) >= 0 ? 'checked' : '') + '> ' + c + ' ' + esc(state.dmeta.segments[c]) + '</label>').join('') + '</div>' +
+      (custom.length ? '<label>Values for this send</label><div class="grid2">' + custom.map(l => { const k = String(l).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return fld(esc(l), '<input data-v="' + esc(k) + '" value="' + esc(s.values[k] || '') + '">'); }).join('') + '</div>' : '') +
+      '<div id="berr"></div><div id="prev"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn" id="sv">Save &amp; preview</button></div>';
+    $('#x', m).onclick = m.close;
+    $('#b-kind', m).onchange = e => { grab(); s.kind = e.target.value; s.template_id = ''; draw(); };
+    $('#b-tpl', m).onchange = () => { grab(); draw(); };
+    $('#sv', m).onclick = saveAndPreview;
+  }
+  function grab() {
+    s.name = val('b-name'); s.template_id = val('b-tpl'); s.send_on = val('b-on'); s.event_date = $('#b-ev') ? val('b-ev') : s.event_date; s.campaign_id = $('#b-camp') ? val('b-camp') : s.campaign_id;
+    s.segments = $$('[data-sg]', m).filter(c => c.checked).map(c => c.dataset.sg); $$('[data-v]', m).forEach(i => { s.values[i.dataset.v] = i.value; });
+  }
+  async function saveAndPreview() {
+    grab(); $('#berr', m).innerHTML = '';
+    try {
+      const saved = await call('donor.broadcasts.save', s.id, { name: s.name, kind: s.kind, template_id: s.template_id, campaign_id: s.campaign_id, segments: s.segments, send_on: s.send_on, event_date: s.event_date, values: s.values });
+      s.id = saved.id;
+      const p = await call('donor.broadcasts.preview', s.id);
+      const bad = !p.count || p.missing.length || !p.template;
+      $('#prev', m).innerHTML = '<div class="card" style="margin-top:12px"><h2>Check before approving</h2><p><b>' + p.count + ' people</b>' + (p.no_optin ? ' (' + p.no_optin + ' have no WhatsApp opt-in and will be skipped)' : '') + '. The 7-day cap and each donor\u2019s working hours still apply when sending.</p>' +
+        (p.sample ? '<label>Sample for ' + esc(p.sample.donor) + '</label><div class="wa">' + esc(p.sample.text) + '</div>' : '<p class="muted">Choose a template to see the text.</p>') +
+        (p.missing.length ? '<div class="alert" style="margin-top:10px">' + p.missing.map(esc).join('<br>') + '</div>' : '') +
+        '<label>Recipients' + (p.count > p.recipients.length ? ' (first ' + p.recipients.length + ')' : '') + '</label><div class="small">' + p.recipients.map(r => segTag(r.segment) + ' ' + esc(r.name) + (r.opt_in ? '' : ' <span class="muted">(no opt-in)</span>')).join(' \u00b7 ') + '</div>' +
+        '<div class="actions"><button class="btn primary" id="ap" ' + (bad ? 'disabled' : '') + '>Approve and queue</button></div></div>';
+      const ap = $('#ap', m); if (ap) ap.onclick = async () => {
+        ap.disabled = true;
+        try { const r = await call('donor.broadcasts.approve', s.id); m.close(); toast(r.queued + ' messages queued'); await driveDonorSend('Sending\u2026'); views['donor/broadcasts'](); }
+        catch (e) { $('#berr', m).innerHTML = errorsHtml(e); ap.disabled = false; }
+      };
+    } catch (e) { $('#berr', m).innerHTML = errorsHtml(e); }
+  }
+  draw();
+  if (s.id && s.template_id) saveAndPreview();
+}
+
+// ---------- message queue ----------
+views['donor/queue'] = async function () {
+  const f = { status: window.__qs || '' };
+  const list = await call('donor.messages.list', f.status ? { status: f.status } : {});
+  main().innerHTML = '<div class="head"><div><h1>Queue</h1><p class="sub" style="margin:0">Every donor message and why it is waiting. The rules: WhatsApp opt-in, one update per donor per 7 days (thank-yous and reports excepted), the donor\u2019s working hours.</p></div><button class="btn primary" id="go">Send waiting messages now</button></div>' +
+    '<div class="card"><div class="row">' + fld('Show', '<select id="qs">' + opt('', 'Everything (newest 300)', !f.status) + ['queued', 'held', 'awaiting_confirmation', 'sent', 'delivered', 'read', 'failed', 'skipped', 'cancelled'].map(s => opt(s, label(s), s === f.status)).join('') + '</select>') + '</div></div>' +
+    '<div class="card scroll">' + (list.length ? '<table><thead><tr><th>Donor</th><th>Message</th><th>Status</th><th>Why / details</th><th>Updated</th><th></th></tr></thead><tbody>' + list.map(m =>
+      '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(m.message_type.replace(/_/g, ' ')) + '<div class="muted">' + esc(m.trigger || '') + (m.channel === 'email' ? ' \u00b7 email to owner' : '') + '</div></td><td>' + badge(m.status) + '</td>' +
+      '<td class="small muted">' + esc(m.hold_reason || m.wa_error || '') + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td><td class="small muted">' + esc(timeAgo(m.updated_at)) + '</td>' +
+      '<td style="white-space:nowrap">' + (['queued', 'held', 'awaiting_confirmation'].indexOf(m.status) >= 0 ? '<button class="btn small" data-c="' + m.id + '">Cancel</button>' : m.status === 'failed' ? '<button class="btn small" data-rt="' + m.id + '">Retry</button>' : '') + '</td></tr>').join('') + '</tbody></table>' : emptyState('list', 'Nothing here', 'Messages appear in the queue as soon as a trigger or broadcast creates them.', null)) + '</div>';
+  $('#qs').onchange = e => { window.__qs = e.target.value; views['donor/queue'](); };
+  $('#go').onclick = async () => { const n = await driveDonorSend(); toast(n + ' sent'); views['donor/queue'](); };
+  $$('[data-c]').forEach(b => b.onclick = async () => { try { await call('donor.messages.cancel', b.dataset.c); views['donor/queue'](); } catch (e) { toast(e.message, true); } });
+  $$('[data-rt]').forEach(b => b.onclick = async () => { try { await call('donor.messages.retry', b.dataset.rt); await driveDonorSend('Retrying\u2026'); views['donor/queue'](); } catch (e) { toast(e.message, true); } });
+};
+
+
+// ---------- command palette (Ctrl/Cmd K) and keyboard shortcuts ----------
+function paletteItems() {
+  const e = (state.session && state.session.entries) || [], d = state.division, items = [];
+  const goto = (v, label, icon, hint) => ({ group: 'Go to', label, icon, hint, run: () => go(v) });
+  if (d === 'parent') {
+    items.push(goto('campaigns', 'Campaigns', 'send', 'G C'), goto('parents', 'Parents', 'users', 'G P'), goto('templates', 'Templates', 'file', 'G T'));
+    items.push({ group: 'Do', label: 'New campaign', icon: 'plus', run: () => go('campaigns/new') }, { group: 'Do', label: 'Upload parents (CSV)', icon: 'upload', run: async () => { await go('parents'); const b = $('#upload'); if (b) b.click(); } },
+      { group: 'Do', label: 'Request a template', icon: 'plus', run: () => go('templates/new') });
+  }
+  if (d === 'donor') {
+    items.push(goto('donor/home', 'Overview', 'grid', 'G O'), goto('donor/donors', 'Donors', 'heart', 'G D'), goto('donor/campaigns', 'Campaigns', 'send', 'G C'), goto('donor/templates', 'Templates', 'file', 'G T'), goto('donor/broadcasts', 'Broadcasts', 'radio', 'G B'), goto('donor/queue', 'Queue', 'list', 'G Q'));
+    items.push({ group: 'Do', label: 'Add a donor', icon: 'plus', run: () => donorForm(null) }, { group: 'Do', label: 'Upload donors (CSV)', icon: 'upload', run: async () => { await go('donor/donors'); const b = $('#up'); if (b) b.click(); } },
+      { group: 'Do', label: 'New broadcast', icon: 'plus', run: async () => { await go('donor/broadcasts'); const b = $('#new'); if (b) b.click(); } },
+      { group: 'Do', label: 'Send waiting messages now', icon: 'send', run: async () => { const n = await driveDonorSend(); toast(n + ' messages sent'); } });
+  }
+  if (e.length >= 2) items.push({ group: 'Workspace', label: 'Switch division', icon: 'swap', run: () => showLanding({}) });
+  e.filter(x => x !== d).forEach(x => items.push({ group: 'Workspace', label: 'Open ' + DIVS[x].title, icon: x === 'donor' ? 'heart' : x === 'parent' ? 'users' : 'grid', run: () => enterDivision(x) }));
+  if (state.session && state.session.can_admin) items.push({ group: 'App', label: 'Users and access', icon: 'shield', run: () => go('admin/users') });
+  items.push({ group: 'App', label: 'Change theme', icon: 'sun', run: cycleTheme }, { group: 'App', label: 'Keyboard shortcuts', icon: 'kbd', hint: '?', run: showShortcuts });
+  return items;
+}
+function openPalette() {
+  if ($('.overlay.cmd')) return;
+  if (!state.session) return;
+  const o = document.createElement('div'); o.className = 'overlay cmd'; const prev = document.activeElement;
+  o.innerHTML = '<div class="cmdk" role="dialog" aria-modal="true" aria-label="Search or jump to"><div class="cmdk-in">' + ICON.search + '<input id="cmd-q" role="combobox" aria-expanded="true" aria-controls="cmd-list" autocomplete="off" placeholder="Search pages and actions' + (state.division === 'donor' ? ', or a donor\u2019s name' : '') + '"></div><ul class="cmdk-list" id="cmd-list" role="listbox"></ul><div class="cmdk-foot"><span><kbd>\u2191</kbd> <kbd>\u2193</kbd> to move</span><span><kbd>Enter</kbd> to open</span><span><kbd>Esc</kbd> to close</span></div></div>';
+  o.addEventListener('mousedown', e => { if (e.target === o) o.close(); });
+  document.body.appendChild(o); document.body.classList.add('noscroll');
+  o.close = () => { if (!o.isConnected) return; o.remove(); if (!$('.overlay')) document.body.classList.remove('noscroll'); if (prev && prev.isConnected) try { prev.focus({ preventScroll: true }); } catch (e) { /* ignore */ } };
+  const inp = $('#cmd-q', o), list = $('#cmd-list', o); let rows = [], sel = 0, found = [], timer = null, seq = 0;
+  const match = (q, t) => { q = q.toLowerCase(); t = t.toLowerCase(); if (t.indexOf(q) === 0) return 3; if (t.indexOf(q) >= 0) return 2; return q.length >= 2 && t.split(/\s+/).map(w => w.charAt(0)).join('').indexOf(q) >= 0 ? 1 : 0; };
+  function draw() {
+    const q = inp.value.trim(), base = paletteItems().filter(i => !q || match(q, i.label)).sort((a, b) => !q ? 0 : match(q, b.label) - match(q, a.label));
+    rows = found.concat(base); sel = Math.min(sel, Math.max(0, rows.length - 1));
+    let g = '';
+    list.innerHTML = rows.length ? rows.map((r, i) => { const head = r.group !== g ? '<li class="cmdk-group" role="presentation">' + esc(r.group) + '</li>' : ''; g = r.group;
+      return head + '<li role="option" id="cmd-' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '">' + ICON[r.icon || 'search'] + '<span>' + esc(r.label) + '</span>' + (r.hint ? '<small>' + esc(r.hint) + '</small>' : '') + '</li>'; }).join('') : '<li class="cmdk-group" style="cursor:default">Nothing matches \u201c' + esc(q) + '\u201d</li>';
+    inp.setAttribute('aria-activedescendant', rows.length ? 'cmd-' + sel : ''); const cur = $('#cmd-' + sel, o); if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function run(i) { const r = rows[i]; if (!r) return; o.close(); setTimeout(() => r.run(), 0); }
+  inp.oninput = () => {
+    sel = 0; clearTimeout(timer); const q = inp.value.trim();
+    if (state.division === 'donor' && q.length >= 2) timer = setTimeout(async () => { const my = ++seq; try { const ds = await call('donor.donors.list', { q }); if (my !== seq) return; found = ds.slice(0, 5).map(d => ({ group: 'Donors', label: d.name, icon: 'heart', hint: d.segment, run: () => donorModal(d.id) })); draw(); } catch (e) { /* ignore */ } }, 220);
+    else found = [];
+    draw();
+  };
+  inp.onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % Math.max(1, rows.length); draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + rows.length) % Math.max(1, rows.length); draw(); }
+    else if (e.key === 'Enter') { e.preventDefault(); run(sel); }
+    else if (e.key === 'Escape') { e.preventDefault(); o.close(); }
+  };
+  list.onclick = e => { const li = e.target.closest('li[data-i]'); if (li) run(Number(li.dataset.i)); };
+  list.onmousemove = e => { const li = e.target.closest('li[data-i]'); if (li && Number(li.dataset.i) !== sel) { sel = Number(li.dataset.i); $$('li[role=option]', list).forEach(x => x.setAttribute('aria-selected', x.dataset.i == sel)); } };
+  draw(); inp.focus();
+}
+$('#cmdbtn').onclick = openPalette;
+
+function showShortcuts() {
+  const d = state.division, rows = [['Ctrl K or Cmd K', 'Search pages, actions and donors'], ['?', 'Show this list'], ['Esc', 'Close a window']];
+  if (d === 'parent') rows.push(['G then C', 'Campaigns'], ['G then P', 'Parents'], ['G then T', 'Templates']);
+  if (d === 'donor') rows.push(['G then O', 'Overview'], ['G then D', 'Donors'], ['G then C', 'Campaigns'], ['G then T', 'Templates'], ['G then B', 'Broadcasts'], ['G then Q', 'Queue']);
+  const m = modal('<h2>Keyboard shortcuts</h2><dl class="keys">' + rows.map(r => '<dt>' + r[0].split(' ').map(k => /^(or|then)$/.test(k) ? ' ' + k + ' ' : '<kbd>' + esc(k) + '</kbd>').join('') + '</dt><dd>' + esc(r[1]) + '</dd>').join('') + '</dl><div class="actions"><button class="btn primary" id="x">Done</button></div>');
+  $('#x', m).onclick = m.close;
+}
+$('#f-keys').onclick = showShortcuts;
+let gPending = false, gTimer = null;
+const G_MAP = { parent: { c: 'campaigns', p: 'parents', t: 'templates' }, donor: { o: 'donor/home', d: 'donor/donors', c: 'donor/campaigns', t: 'donor/templates', b: 'donor/broadcasts', q: 'donor/queue' } };
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if ($('.overlay.cmd')) $('.overlay.cmd').close(); else openPalette(); return; }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || $('.overlay')) return;
+  if (e.key === '?') { e.preventDefault(); showShortcuts(); return; }
+  if (e.key === '/' && $('#q')) { e.preventDefault(); $('#q').focus(); return; }
+  if (gPending) { clearTimeout(gTimer); gPending = false; const v = (G_MAP[state.division] || {})[e.key.toLowerCase()]; if (v) { e.preventDefault(); go(v); } return; }
+  if (e.key.toLowerCase() === 'g' && G_MAP[state.division]) { gPending = true; gTimer = setTimeout(() => { gPending = false; }, 1200); }
+});
+
+// ---------- boot ----------
+
+// ================= Users and access (administrators) =================
+const FILE_NOTES = {
+  access: 'Who can use the app, and the totals shown on the Organisation Overview. Everyone signed in can read it; only administrators can change it.',
+  parent: 'Parents, parent campaigns and messages. Shared only with people who have Parent Communication access.',
+  donor: 'Donors, donations, donor campaigns and messages. Shared only with people who have Donor Communication access.'
+};
+const CAP_LABELS = { users_parent: 'Parent users', users_donor: 'Donor users', audit: 'Access log' };
+const roleBadge = u => u.owner ? '<span class="badge b-confirmed">Owner</span>' : u.role === 'master' ? '<span class="badge b-confirmed">Master</span>' : u.role === 'admin' ? '<span class="badge b-sent">Administrator</span>' : 'Staff';
+// What the signed-in person may do to a given person (the server enforces the same rules).
+function canManage(actor, u) {
+  if (actor.role === 'master') return !u.owner || u.email === actor.email;
+  if (u.role !== 'staff') return false;
+  return (!u.parent_access || actor.caps.indexOf('users_parent') >= 0) && (!u.donor_access || actor.caps.indexOf('users_donor') >= 0) && (actor.caps.indexOf('users_parent') >= 0 || actor.caps.indexOf('users_donor') >= 0);
+}
+
+views['admin/users'] = async function () {
+  const me = state.session.user, isMaster = me.role === 'master', canAudit = isMaster || me.caps.indexOf('audit') >= 0;
+  const [users, files, log, addr] = await Promise.all([call('admin.users.list'), call('admin.files'), canAudit ? call('admin.log') : Promise.resolve(null), call('admin.addresses')]);
+  const tick = v => v ? '<span class="badge b-approved">Yes</span>' : '<span class="muted">No</span>';
+  const masters = users.filter(u => u.role === 'master' && u.active).length;
+  const until = u => u.expires_on ? (u.expired ? '<span class="badge b-cancelled">Ended ' + esc(u.expires_on) + '</span>' : '<span class="small">' + esc(u.expires_on) + '</span>') : '<span class="muted">No end date</span>';
+  main().innerHTML = '<p><button class="link" id="back">Back to your workspace</button></p>' +
+    '<div class="head"><div><h1>Users and access</h1><p class="sub">Choose who can use the app and which department each person can open. Saving a person also shares or unshares the Google Sheets, so the departments stay separate.</p></div><button class="btn primary" id="addu">Add user</button></div>' +
+    (me.owner && masters < 2 ? '<div class="alert info"><b>You are the only master administrator.</b> Appoint a second one so access can still be managed if you are away. Also keep the three Google Sheets in an organisation account (not a personal one) with 2-step verification turned on.</div>' : '') +
+    '<div class="card scroll"><table><thead><tr><th>Person</th><th>Role</th><th>Parent</th><th>Donor</th><th>Overview</th><th>Access until</th><th>Status</th><th></th></tr></thead><tbody>' + users.map(u =>
+      '<tr><td><b>' + esc(u.full_name || u.email) + '</b>' + (u.email === me.email ? ' <span class="tag">You</span>' : '') + '<div class="small muted">' + esc(u.email) + '</div></td><td>' + roleBadge(u) +
+      (u.role === 'admin' ? '<div class="small muted">' + u.caps.map(c => esc(CAP_LABELS[c] || c)).join(', ') + '</div>' : '') + '</td><td>' + tick(u.parent_access) + '</td><td>' + tick(u.donor_access) + '</td><td>' + tick(u.org_overview) + '</td><td>' + until(u) + '</td><td>' +
+      (u.active && !u.expired ? '<span class="badge b-approved">Active</span>' : '<span class="badge b-cancelled">Inactive</span>') + '</td><td>' + (canManage(me, u) ? '<button class="btn small" data-e="' + esc(u.email) + '">Edit</button>' : '<span class="muted small">View only</span>') + '</td></tr>').join('') + '</tbody></table></div>' +
+    '<details class="card"><summary style="cursor:pointer;font-weight:600">What each role can do</summary><div class="scroll" style="margin-top:10px"><table><thead><tr><th>Role</th><th>Can do</th></tr></thead><tbody>' +
+      '<tr><td><b>Owner</b></td><td class="small">The person who set up the project. Always a master administrator, cannot be removed or locked out, and is the only one who appoints other masters.</td></tr>' +
+      '<tr><td><b>Master</b></td><td class="small">Everything, in every department: add and change administrators and staff, give Organisation Overview access, see the access log, check and fix file sharing. Masters can open all three files.</td></tr>' +
+      '<tr><td><b>Administrator</b></td><td class="small">Only what a master gave them: <b>Parent users</b> (add and manage parent staff), <b>Donor users</b> (same for donor staff), and/or <b>Access log</b> (see changes and check who can open each file). They manage ordinary staff only, never other administrators.</td></tr>' +
+      '<tr><td><b>Staff</b></td><td class="small">Work in the departments they were given. Can set an end date so access stops by itself.</td></tr></tbody></table></div></details>' +
+    '<div class="card"><h2>Where the data lives</h2><p class="small muted" style="margin-top:0">Three separate Google Sheets. Someone who is not shared on a sheet cannot open it, in the app or in Google Drive.</p><div class="scroll"><table><tbody>' + files.map(f =>
+      '<tr><td style="width:28%"><b>' + esc(f.label) + '</b><div class="small muted">' + esc(f.name) + '</div></td><td class="small">' + esc(FILE_NOTES[f.file]) + '</td><td style="white-space:nowrap">' + (f.url ? '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">Open sheet</a>' : '<span class="muted small">' + esc(f.error || 'Not created yet') + '</span>') + '</td></tr>').join('') + '</tbody></table></div></div>' +
+    '<div class="card"><h2>App addresses: one is enough</h2>' + (addr.instant
+      ? '<p class="small muted" style="margin-top:0">Instant updates are <b>on</b>: the project is published at two web addresses.</p>'
+      : '<p class="small muted" style="margin-top:0"><b>One-address mode.</b> Messages send straight away. Delivery ticks and parents\u2019 replies are fetched from Twilio every few minutes instead of arriving instantly. Phone calls (not in use yet) would need the second address.</p>') +
+      '<div class="scroll"><table><tbody>' +
+      '<tr><td style="width:22%"><b>Staff app</b></td><td class="small">The link you share with your team, and the one you are using right now. People sign in with Google. In Deploy, Manage deployments it is set to: <i>Execute as: User accessing the web app</i> and <i>Who has access: Anyone with Google account</i>.</td><td class="small muted">The address in your browser</td></tr>' +
+      '<tr><td><b>Twilio address</b><div class="small muted">optional</div></td><td class="small">Only needed for instant updates and phone calls. Twilio uses it to call the app back; nobody opens it. Set to: <i>Execute as: Me</i> and <i>Who has access: Anyone</i>. Saved in settings as <code>PUBLIC_BASE_URL</code>.</td><td class="small">' +
+        (addr.twilio ? '<code style="word-break:break-all">' + esc(addr.twilio) + '</code> <button class="btn small" id="cpt">Copy</button>' : '<span class="muted">Not set: not needed</span>') + '</td></tr></tbody></table></div>' +
+      '<p class="small muted" style="margin-bottom:0">After any update, make a <b>New version</b> on each address you use. To test the Twilio address, type <code>?hook=ping</code> after <code>/exec</code> and open it; it should say &ldquo;webhook ok&rdquo;.</p></div>' +
+    (canAudit ? '<div class="card"><h2>Check who can open each file</h2><p class="small muted" style="margin-top:0">Compares the people shared on each Google Sheet with what is set above. It catches sheets shared by hand in Google Drive.</p><button class="btn" id="audit">Check access</button><div id="auditout" style="margin-top:14px"></div></div>' +
+      '<div class="card"><h2>Recent changes</h2>' + (log.length ? '<ul class="tl">' + log.map(l => '<li><b>' + esc(l.action.replace('.', ' ')) + '</b> ' + esc(l.email) + ' <span class="muted small">by ' + esc(l.by) + ' \u00b7 ' + esc(timeAgo(l.at)) + '</span>' + (l.details ? '<div class="small muted">' + esc(l.details) + '</div>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">Nothing yet.</p>') + '</div>' : '');
+  $('#back').onclick = goHome;
+  const cpt = $('#cpt'); if (cpt) cpt.onclick = () => navigator.clipboard.writeText(addr.twilio).then(() => toast('Copied'), () => toast('Select the address and copy it by hand', true));
+  $('#addu').onclick = () => userForm(null);
+  $$('[data-e]').forEach(b => b.onclick = () => userForm(users.find(u => u.email === b.dataset.e)));
+  if (canAudit) $('#audit').onclick = runAudit;
+  async function runAudit() {
+    const out = $('#auditout'); out.innerHTML = '<div class="small muted">Checking\u2026</div>';
+    try {
+      const r = await call('admin.audit'), bad = r.reduce((n, f) => n + f.problems, 0), who = h => h === 'edit' ? 'Can edit' : h === 'view' ? 'Can view' : h === 'owner' ? 'Owner' : 'Nothing';
+      out.innerHTML = (bad ? '<div class="alert">' + bad + ' difference' + (bad === 1 ? '' : 's') + ' found. Someone can open a file they should not, or cannot open one they should.</div>' : '<div class="alert ok">Everything matches. Each person can open exactly what they should.</div>') +
+        r.map(f => '<h3 style="margin:14px 0 6px">' + esc(f.label) + '</h3>' + (f.error ? '<p class="muted small">' + esc(f.error) + '</p>' : '<div class="scroll"><table><thead><tr><th>Person</th><th>Has now</th><th>Should have</th><th></th></tr></thead><tbody>' + f.people.map(p =>
+          '<tr><td>' + esc(p.email) + '</td><td>' + who(p.has) + '</td><td>' + who(p.should) + '</td><td>' + (p.ok ? '<span class="badge b-approved">OK</span>' : '<span class="badge b-failed">Differs</span>') + '</td></tr>').join('') + '</tbody></table></div>')).join('') +
+        (bad && isMaster ? '<div class="actions"><button class="btn primary" id="fixacc">Fix access</button></div><p class="small muted" style="text-align:right">Fixing removes access nobody asked for and adds what is missing.</p>' : (bad ? '<p class="small muted">A master administrator can fix these.</p>' : ''));
+      const fx = $('#fixacc'); if (fx) fx.onclick = async () => { if (!confirm('Fix access? People who are shared on a file but should not be will be removed from it.')) return; try { const x = await call('admin.fixAccess'); toast('Access fixed' + (x.removed ? ': ' + x.removed + ' removed' : '')); runAudit(); } catch (e) { toast(e.message, true); } };
+    } catch (e) { out.innerHTML = '<div class="alert">' + esc(e.message) + '</div>'; }
+  }
+};
+
+function userForm(u) {
+  const me = state.session.user, isMaster = me.role === 'master', isNew = !u, self = u && u.email === me.email;
+  u = u || { email: '', full_name: '', role: 'staff', active: true, parent_access: false, donor_access: false, org_overview: false, caps: [], expires_on: null };
+  const canDept = d => isMaster || me.caps.indexOf('users_' + d) >= 0, locked = self ? 'disabled' : '';
+  const m = modal('<h2>' + (isNew ? 'Add user' : 'Edit user') + '</h2>' +
+    fld('Google account email', '<input id="u-email" type="email" value="' + esc(u.email) + '" ' + (isNew ? '' : 'disabled') + ' placeholder="name@gmail.com">') + fld('Name', '<input id="u-name" value="' + esc(u.full_name) + '">') +
+    fld('Role', '<select id="u-role" ' + (self || !isMaster ? 'disabled' : '') + '>' + opt('staff', 'Staff: works in the departments below', u.role === 'staff') + (isMaster ? opt('admin', 'Administrator: manages only what you choose', u.role === 'admin') : '') + (me.owner ? opt('master', 'Master: can do everything', u.role === 'master') : u.role === 'master' ? opt('master', 'Master', true) : '') + '</select>') +
+    '<div id="capbox" ' + (u.role === 'admin' ? '' : 'hidden') + '><label>This administrator can manage</label><div class="checks" style="flex-direction:column;align-items:flex-start">' +
+      '<label><input type="checkbox" data-cap="users_parent" ' + (u.caps.indexOf('users_parent') >= 0 ? 'checked' : '') + ' ' + locked + '> Parent users (add and manage parent staff; needs Parent access below)</label>' +
+      '<label><input type="checkbox" data-cap="users_donor" ' + (u.caps.indexOf('users_donor') >= 0 ? 'checked' : '') + ' ' + locked + '> Donor users (add and manage donor staff; needs Donor access below)</label>' +
+      '<label><input type="checkbox" data-cap="audit" ' + (u.caps.indexOf('audit') >= 0 ? 'checked' : '') + ' ' + locked + '> Access log (see changes and check who can open each file)</label></div></div>' +
+    '<label>Can open</label><div class="checks" style="flex-direction:column;align-items:flex-start">' +
+    '<label><input type="checkbox" id="u-parent" ' + (u.parent_access ? 'checked' : '') + ' ' + (self || !canDept('parent') ? 'disabled' : '') + '> Parent Communication</label>' +
+    '<label><input type="checkbox" id="u-donor" ' + (u.donor_access ? 'checked' : '') + ' ' + (self || !canDept('donor') ? 'disabled' : '') + '> Donor Communication</label>' +
+    '<label id="ovl"><input type="checkbox" id="u-ov" ' + (u.org_overview ? 'checked' : '') + '> Organisation Overview (totals only; administrators and masters, set by a master)</label></div>' +
+    fld('Access until (optional)', '<input id="u-until" type="date" value="' + esc(u.expires_on || '') + '" ' + locked + '>') + '<p class="small muted" style="margin-top:4px">After this date access stops by itself. Leave empty for no end date. Good for volunteers, interns and contractors.</p>' +
+    '<label class="inline"><input type="checkbox" id="u-active" ' + (u.active ? 'checked' : '') + ' ' + locked + '> Active (can sign in)</label>' +
+    '<p class="small muted">' + (self ? (u.owner ? 'You are the owner. Your access is permanent. You can change your name.' : 'You cannot change your own role, status or access. Ask another administrator.') : isMaster ? 'Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.' : 'You can manage ordinary staff in the departments you administer. Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.') + '</p><div id="uerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">' + (isNew ? 'Add user' : 'Save changes') + '</button></div>', true);
+  const syncRole = () => {
+    const r = $('#u-role', m).value; $('#capbox', m).hidden = r !== 'admin';
+    const ov = $('#u-ov', m), canOv = !self && isMaster && r !== 'staff'; ov.disabled = !canOv; if (!canOv && r === 'staff') ov.checked = false;
+    if (r === 'master') { ['#u-parent', '#u-donor', '#u-ov'].forEach(id => { $(id, m).checked = true; $(id, m).disabled = true; }); }
+  };
+  $('#u-role', m).onchange = syncRole; syncRole(); $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => {
+    const role = $('#u-role', m).value;
+    try {
+      const r = await call('admin.users.save', { email: val('u-email').trim(), full_name: val('u-name').trim(), role, active: $('#u-active', m).checked, parent_access: $('#u-parent', m).checked, donor_access: $('#u-donor', m).checked,
+        org_overview: $('#u-ov', m).checked, caps: role === 'admin' ? $$('[data-cap]', m).filter(c => c.checked).map(c => c.dataset.cap) : [], expires_on: val('u-until') });
+      m.close();
+      if (r.warnings.length) { const w = modal('<h2>Saved, but check the sharing</h2><div class="alert">' + r.warnings.map(esc).join('<br>') + '</div><p class="small muted">The person is saved. Use Check access on the Users and access page to see exactly who can open each file.</p><div class="actions"><button class="btn primary" id="x">OK</button></div>'); $('#x', w).onclick = w.close; }
+      else toast((isNew ? 'User added' : 'Saved') + '. File sharing updated');
+      views['admin/users']();
+    } catch (e) { $('#uerr', m).innerHTML = errorsHtml(e); }
+  };
+}
+
+// ---------- logo (imported from Drive by the project owner) ----------
+function applyLogo() {
+  if (!LOGO) return;
+  const probe = new Image();
+  probe.onload = () => {
+    document.documentElement.dataset.logo = probe.naturalWidth / probe.naturalHeight > 2.2 ? 'wide' : 'square';
+    $$('.mark').forEach(svg => { const i = document.createElement('img'); i.className = 'mark-img'; i.src = LOGO; i.alt = ''; svg.replaceWith(i); });
+    const sp = $('.sp-in'); if (sp) { const big = document.createElement('img'); big.className = 'sp-logo'; big.src = LOGO; big.alt = 'Ek Tara'; sp.insertBefore(big, sp.firstChild); }
+  };
+  probe.src = LOGO;   // if the image cannot be read the built-in mark stays
+}
+applyLogo();
+initChrome();
+showLanding({}).then(hideSplash, hideSplash);
+setTimeout(() => { if (document.getElementById('splash') && !document.getElementById('splash').classList.contains('out')) window.__bootFail('The server has not answered after ' + Math.round(BOOT_WATCH_MS / 1000) + ' seconds. Check that both deployments use the newest version.'); }, BOOT_WATCH_MS);
+</script>
+</body>
+</html>
