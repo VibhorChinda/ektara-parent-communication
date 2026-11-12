@@ -1000,7 +1000,7 @@ var SCHEMA = {
     ['org_overview', 's'], ['role', 's'], ['admin_caps', 's'], ['expires_on', 's']],
   Parents: [['id', 's'], ['parent_name', 's'], ['phone_e164', 's'], ['child_name', 's'], ['institution', 's'],
     ['institution_type', 's'], ['class_or_year', 's'], ['section', 's'], ['language', 's'],
-    ['has_whatsapp', 'b'], ['opted_out', 'b'], ['created_at', 's']],
+    ['has_whatsapp', 'b'], ['opted_out', 'b'], ['created_at', 's'], ['updated_at', 's']],
   Templates: [['id', 's'], ['name', 's'], ['language', 's'], ['category', 's'], ['body', 's'],
     ['variable_names', 'j'], ['sample_values', 'j'], ['has_confirm_buttons', 'b'], ['status', 's'],
     ['twilio_content_sid', 's'], ['rejection_reason', 's'], ['requested_by', 's'], ['decision_seen', 'b'],
@@ -2635,7 +2635,9 @@ function runFallback_(deadline) {
 // ===== Parents.gs =====
 var BUILD_Parents = '20261107-1230'; // build stamp (see Build.gs)
 /** Parents: CSV upload, directory, edit, move, delete. */
-var REQUIRED_COLUMNS = ['parent_name', 'phone', 'institution', 'class_or_year'];
+var REQUIRED_COLUMNS = ['parent_name', 'phone', 'institution', 'class_or_year', 'has_whatsapp'];
+// Languages the app has phone-call scripts for. Blank means English.
+var LANGUAGES = { en: 'en', english: 'en', hi: 'hi', hindi: 'hi', ta: 'ta', tamil: 'ta' };
 var TRUE_VALUES = ['true', 'yes', 'y', '1'];
 var FALSE_VALUES = ['false', 'no', 'n', '0'];
 var COLLEGE_YEARS = ['1', '2', '3', '4'];
@@ -2694,11 +2696,14 @@ function cleanParent_(f) {
   if (!phoneRaw) return { error: 'phone is empty' };
   var phone = normalizePhone_(phoneRaw);
   if (!phone) return { error: "invalid phone number '" + phoneRaw + "'" };
+  var langRaw = String(f.language || '').trim().toLowerCase();
+  var language = langRaw ? LANGUAGES[langRaw] : 'en';
+  if (!language) return { error: "language must be en, hi or ta (or English, Hindi, Tamil), got '" + String(f.language).trim() + "'" };
   return {
     row: {
       parent_name: name, phone_e164: phone, child_name: String(f.child_name || '').trim() || null,
       institution: institution, institution_type: type, class_or_year: lv.level, section: lv.section,
-      language: String(f.language || '').trim().toLowerCase() || 'en'
+      language: language
     }
   };
 }
@@ -2737,17 +2742,18 @@ function uploadParents_(user, csvText) {
     var rec = {};
     header.forEach(function (h, j) { rec[h] = cells[j] === undefined ? '' : String(cells[j]); });
     var res = cleanParent_(rec);
-    if (res.error) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: res.error }); continue; }
+    if (res.error) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: res.error }); continue; }
+    if (!String(rec.has_whatsapp || '').trim()) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: 'has_whatsapp is empty; write yes or no' }); continue; }
     var wa = parseBool_(rec.has_whatsapp);
-    if (wa === null) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: "has_whatsapp must be yes/no/true/false, got '" + rec.has_whatsapp + "'" }); continue; }
+    if (wa === null) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: "has_whatsapp must be yes/no/true/false, got '" + rec.has_whatsapp + "'" }); continue; }
     var p = res.row; p.has_whatsapp = wa;
     var known = typeOf[p.institution];
     if (known && known.type !== p.institution_type) {
-      rejected.push({ row: rowNumber, phone: rec.phone || null, reason: "'" + p.institution + "' is a " + known.type + ' in row ' + known.row });
+      rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: "'" + p.institution + "' is a " + known.type + ' in row ' + known.row });
       continue;
     }
     if (byPhone[p.phone_e164]) {
-      rejected.push({ row: rowNumber, phone: rec.phone || null, reason: 'duplicate phone, already in row ' + firstRow[p.phone_e164] });
+      rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: 'duplicate phone, already in row ' + firstRow[p.phone_e164] });
       continue;
     }
     byPhone[p.phone_e164] = p; firstRow[p.phone_e164] = rowNumber;
@@ -2757,21 +2763,24 @@ function uploadParents_(user, csvText) {
   return withLock_(function () {
     var existing = {};
     loadTable_('Parents').forEach(function (r) { existing[r.phone_e164] = r; });
-    var toUpdate = [], toInsert = [];
+    var toUpdate = [], toInsert = [], rows = [], now = nowIso_();
     Object.keys(byPhone).forEach(function (phone) {
       var p = byPhone[phone], old = existing[phone];
       if (old) {
         // opted_out is never reset by a re-upload.
         Object.keys(p).forEach(function (k) { old[k] = p[k]; });
+        old.updated_at = now;
         toUpdate.push(old);
       } else {
-        p.id = newId_(); p.opted_out = false; p.created_at = nowIso_();
+        p.id = newId_(); p.opted_out = false; p.created_at = now; p.updated_at = now;
         toInsert.push(p);
       }
+      rows.push({ row: firstRow[phone], parent_name: p.parent_name, phone: phone, status: old ? 'updated' : 'added' });
     });
     saveRows_('Parents', toUpdate);
     insertRows_('Parents', toInsert);
-    return { inserted: toInsert.length, updated: toUpdate.length, rejected: rejected.length, errors: rejected };
+    rows.sort(function (a, b) { return a.row - b.row; });
+    return { inserted: toInsert.length, updated: toUpdate.length, rejected: rejected.length, errors: rejected, rows: rows };
   });
 }
 
@@ -2802,6 +2811,8 @@ function listParents_(user, f) {
     if (m.status === 'flagged') s.flagged++;
   });
   sortBy_(parents, ['institution', 'class_or_year', 'parent_name', 'id']);
+  // Most recently added or updated first (the sort is stable, so each upload keeps the order above).
+  parents.sort(function (a, b) { return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')); });
   return parents.map(function (p) {
     p.stats = stats[p.id] || { total: 0, responded: 0, flagged: 0 };
     delete p._row;
@@ -2820,6 +2831,7 @@ function updateParent_(user, id, body) {
     Object.keys(res.row).forEach(function (k) { parent[k] = res.row[k]; });
     parent.has_whatsapp = !!body.has_whatsapp;
     parent.opted_out = !!body.opted_out;
+    parent.updated_at = nowIso_();
     saveRows_('Parents', [parent]);
     delete parent._row;
     return parent;

@@ -389,7 +389,7 @@ const ICON = {
   kbd: svgi('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'), swap: svgi('<path d="M7 7h12l-3-3M17 17H5l3 3"/>'), home: svgi('<path d="m4 11 8-7 8 7M6 10v9h12v-9"/>')
 };
 const NAVS = {
-  nav: [['campaigns', 'Campaigns', 'send'], ['parents', 'Parents', 'users'], ['templates', 'Templates', 'file']],
+  nav: [['campaigns', 'Campaigns', 'send'], ['parents', 'Parent Info', 'users'], ['templates', 'Templates', 'file']],
   dnav: [['donor/home', 'Overview', 'grid'], ['donor/donors', 'Donors', 'heart'], ['donor/campaigns', 'Campaigns', 'send'], ['donor/templates', 'Templates', 'file'], ['donor/broadcasts', 'Broadcasts', 'radio'], ['donor/queue', 'Queue', 'list']]
 };
 Object.keys(NAVS).forEach(id => { $('#' + id).innerHTML = NAVS[id].map(n => '<a data-go="' + n[0] + '" href="#"><i class="ni">' + ICON[n[2]] + '</i><span>' + n[1] + '</span></a>').join(''); });
@@ -647,7 +647,12 @@ views['campaigns/new'] = async function (preselected) {
       (s.inst ? '<p class="muted small" style="margin:10px 0 0">' + parents + ' parents (' + wa + ' on WhatsApp, ' + (parents - wa) + (info.voice_enabled ? ' phone only' : ' without WhatsApp, not messaged') + '). Opted-out parents are skipped.</p>' : '') + '</div>' +
       '<div class="card"><h2>2. Template</h2><select id="t-sel"><option value="">Choose an approved template…</option>' + templates.map(t => opt(t.id, t.name + ' (' + t.language + ')', t.id === s.tpl)).join('') + '</select>' +
       '<p class="muted small">Each parent gets the version in their language when an approved template with the same name exists in it.</p>' +
-      (tpl ? '<div class="grid2">' + placeholders(tpl.body).map(n => '<div><label>{{' + n + '}} ' + esc((tpl.variable_names || [])[n - 1] || '') + '</label><input data-var="' + n + '" value="' + esc(s.values[n] || '') + '" placeholder="' + esc((tpl.sample_values || {})[n] || '') + '"></div>').join('') + '</div>' +
+      (tpl ? '<div class="grid2">' + placeholders(tpl.body).map(n => {
+        const name = (tpl.variable_names || [])[n - 1] || '', label = '<label>{{' + n + '}} ' + esc(name) + '</label>';
+        // A blank labelled "time" gets a time picker, so every campaign uses the same format (10:00 AM).
+        if (/time/i.test(name)) return '<div>' + label + '<input type="time" data-var="' + n + '" data-time="1" value="' + esc(to24h(s.values[n])) + '"></div>';
+        return '<div>' + label + '<input data-var="' + n + '" value="' + esc(s.values[n] || '') + '" placeholder="' + esc((tpl.sample_values || {})[n] || '') + '"></div>';
+      }).join('') + '</div>' +
         '<label>Preview</label><div class="wa">' + esc(body) + (tpl.has_confirm_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div>' : '') + '</div>' +
       '<div id="err"></div>' +
       '<div class="row"><div>' + (est ? '<span class="muted small">' + esc(est) + '</span>' : '') + '</div><button class="btn primary" id="send" ' + (s.inst && tpl ? '' : 'disabled') + '>Send campaign</button></div>';
@@ -655,7 +660,7 @@ views['campaigns/new'] = async function (preselected) {
     $('#a-lvl').onchange = e => { s.lvl = e.target.value; s.sec = ''; draw(); };
     $('#a-sec').onchange = e => { s.sec = e.target.value; draw(); };
     $('#t-sel').onchange = e => { s.tpl = e.target.value; s.values = {}; draw(); };
-    $$('[data-var]').forEach(i => i.oninput = () => { s.values[i.dataset.var] = i.value; const t2 = templates.find(t => t.id === s.tpl); let b = t2.body; placeholders(b).forEach(n => { b = b.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); $('.wa').firstChild.textContent = b; });
+    $$('[data-var]').forEach(i => i.oninput = () => { s.values[i.dataset.var] = i.dataset.time ? to12h(i.value) : i.value; const t2 = templates.find(t => t.id === s.tpl); let b = t2.body; placeholders(b).forEach(n => { b = b.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); $('.wa').firstChild.textContent = b; });
     $('#send').onclick = confirmSend;
   }
   function confirmSend() {
@@ -674,6 +679,20 @@ views['campaigns/new'] = async function (preselected) {
   }
   draw();
 };
+
+// Time picker value "14:05" <-> message text "2:05 PM".
+function to12h(v) {
+  const m = /^(\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return '';
+  const h = Number(m[1]);
+  return (h % 12 || 12) + ':' + m[2] + ' ' + (h < 12 ? 'AM' : 'PM');
+}
+function to24h(v) {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(v || '');
+  if (!m) return '';
+  const h = Number(m[1]) % 12 + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return ('0' + h).slice(-2) + ':' + m[2];
+}
 
 // Apps Script has no background jobs: the page keeps asking the server to send the next batch.
 async function driveSend(id, total) {
@@ -712,7 +731,7 @@ async function campaignDetail(id, statusFilter) {
     '<div class="card">' + progressBar(c.counts) + '<div class="chips"><span class="chip ' + (group ? '' : 'on') + '" data-g="">All (' + c.counts.total + ')</span>' +
     GROUPS.map(g => { const n = gcount(c.counts, g.statuses); return n ? '<span class="chip ' + (group === g.key ? 'on' : '') + '" data-g="' + g.key + '">' + g.label + ' (' + n + ')</span>' : ''; }).join('') + '</div>' +
     '<div class="wa" style="margin-top:6px">' + esc(templateText(c)) + (c.template_has_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div></div>' +
-    '<div class="card scroll">' + (msgs.length ? '<table><thead><tr><th>Parent</th><th>Child</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
+    '<div class="card scroll">' + (msgs.length ? '<table><thead><tr><th>Parent</th><th>Student</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
       msgs.map(m => '<tr class="click" data-m="' + m.id + '"><td>' + esc(m.parents.parent_name) + '</td><td>' + esc(m.parents.child_name || '') + '</td><td>' + esc(m.parents.phone_e164) + '</td><td>' + badge(m.status) + '</td><td class="small muted">' + esc(messageDetails(m)) + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td></tr>').join('') +
       '</tbody></table>' : '<div class="empty">No parents in this view.</div>') + '</div>';
 
@@ -785,6 +804,27 @@ const SAMPLE_CSV = 'parent_name,phone,child_name,institution,institution_type,cl
   'Asha Rao,98765 43210,Riya Rao,Sunrise Public School,school,7,B,hi,yes\n' +
   'Vikram Shah,+919812345678,Aarav Shah,Sunrise Public School,school,7,B,en,no\n' +
   'Meera Iyer,98400 12345,Karthik Iyer,City Engineering College,college,2,,ta,yes\n';
+const REPLIES_HELP = 'Replies: how many messages this parent answered (on WhatsApp, on the phone call, or recorded by staff), out of how many were sent. Red means someone should follow up personally.';
+
+function repliesHtml(s) {
+  if (!s.total) return '<span class="muted">No messages yet</span>';
+  return s.responded + ' of ' + s.total + ' answered' + (s.flagged ? ' <span class="badge b-flagged">' + s.flagged + ' to follow up</span>' : '');
+}
+
+// The BOM makes Excel read the file as UTF-8.
+function sampleCsvHref() { return 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + SAMPLE_CSV); }
+
+/** One line per CSV row: Added, Updated or Rejected (with the reason). */
+function uploadResultHtml(r) {
+  const STATUS = { added: ['confirmed', 'Added'], updated: ['sent', 'Updated'], rejected: ['failed', 'Rejected'] };
+  const lines = (r.rows || []).map(x => ({ row: x.row, name: x.parent_name, phone: x.phone, status: x.status, reason: '' }))
+    .concat((r.errors || []).map(e => ({ row: e.row, name: e.parent_name || '', phone: e.phone || '', status: 'rejected', reason: e.reason })))
+    .sort((a, b) => a.row - b.row);
+  return '<div class="card"><b>Latest upload: ' + r.inserted + ' added, ' + r.updated + ' updated, ' + r.rejected + ' rejected.</b>' +
+    (lines.length ? '<div class="scroll"><table><thead><tr><th>CSV row</th><th>Parent</th><th>Phone</th><th>Status</th><th>Reason</th></tr></thead><tbody>' +
+      lines.map(x => '<tr><td>' + x.row + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.phone) + '</td><td><span class="badge b-' + STATUS[x.status][0] + '">' + STATUS[x.status][1] + '</span></td><td class="small muted">' + esc(x.reason) + '</td></tr>').join('') +
+      '</tbody></table></div>' : '') + '</div>';
+}
 
 views.parents = async function () {
   const all = await call('parents.list', {});
@@ -802,27 +842,27 @@ views.parents = async function () {
     const secs = f.class_or_year ? tally(all.filter(p => p.institution === f.institution && p.class_or_year === f.class_or_year), p => p.section, () => 1) : [];
     const rows = filtered();
     main().innerHTML = noticesHtml() +
-      '<div class="head"><div><h1>Parents</h1><p class="sub" style="margin:0">' + all.length + ' parents. Upload a CSV to add or update them.</p></div>' +
+      '<div class="head"><div><h1>Parent Info</h1><p class="sub" style="margin:0">' + all.length + (all.length === 1 ? ' parent' : ' parents') + ' saved. Upload a CSV file to add new parents or update existing ones. The newest changes are shown first.</p></div>' +
       '<div class="row" style="flex:0 0 auto"><button class="btn" id="sample">Sample CSV</button><button class="btn" id="move">Move group</button><button class="btn danger" id="delgrp">Delete group</button>' +
       '<button class="btn primary" id="upload">Upload CSV</button><input type="file" id="file" accept=".csv,text/csv" style="display:none"></div></div>' +
-      (result ? '<div class="card"><b>' + result.inserted + ' added, ' + result.updated + ' updated, ' + result.rejected + ' rejected.</b>' +
-        (result.errors.length ? '<div class="scroll"><table><thead><tr><th>Row</th><th>Phone</th><th>Reason</th></tr></thead><tbody>' + result.errors.map(e => '<tr><td>' + e.row + '</td><td>' + esc(e.phone || '') + '</td><td>' + esc(e.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') + '</div>' : '') +
+      (result ? uploadResultHtml(result) : '') +
       '<div class="card"><div class="row">' +
       '<div><label>Search</label><input id="q" value="' + esc(f.q) + '" placeholder="Name or phone"></div>' +
       '<div><label>School / college</label><select id="f-inst"><option value="">All</option>' + insts.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === f.institution)).join('') + '</select></div>' +
       '<div><label>Class / year</label><select id="f-lvl" ' + (f.institution ? '' : 'disabled') + '><option value="">All</option>' + levels.map(i => opt(i.value, i.value, i.value === f.class_or_year)).join('') + '</select></div>' +
       '<div><label>Section</label><select id="f-sec" ' + (f.class_or_year ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === f.section)).join('') + '</select></div></div>' +
-      '<label class="inline"><input type="checkbox" id="hard" ' + (f.hard ? 'checked' : '') + '> Hard to reach (answered none of their last 2+ messages)</label></div>' +
-      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Parent</th><th>Child</th><th>Phone</th><th>Group</th><th>Lang</th><th>Answered</th><th></th></tr></thead><tbody>' +
+      '<label class="inline"><input type="checkbox" id="hard" ' + (f.hard ? 'checked' : '') + '> Hard to reach: hasn’t answered any message (2 or more sent)</label></div>' +
+      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Parent</th><th>Student</th><th>Phone</th><th>Group</th><th>Lang</th><th title="' + esc(REPLIES_HELP) + '">Replies</th><th>WhatsApp</th></tr></thead><tbody>' +
         rows.map(p => '<tr class="click" data-p="' + p.id + '"><td>' + esc(p.parent_name) + '</td><td>' + esc(p.child_name || '') + '</td><td>' + esc(p.phone_e164) + '</td><td class="small">' + esc(p.institution) + ' \u00b7 ' + (p.institution_type === 'college' ? 'Year ' : 'Class ') + esc(p.class_or_year) + (p.section ? ' ' + esc(p.section) : '') + '</td><td>' + esc(p.language) + '</td>' +
-          '<td>' + p.stats.responded + ' / ' + p.stats.total + (p.stats.flagged ? ' <span class="badge b-flagged">' + p.stats.flagged + '</span>' : '') + '</td><td class="small muted">' + (p.opted_out ? '<span class="badge b-cancelled">Opted out</span> ' : '') + (p.has_whatsapp ? '' : 'No WhatsApp') + '</td></tr>').join('') + '</tbody></table>'
+          '<td>' + repliesHtml(p.stats) + '</td><td class="small muted">' + (p.has_whatsapp ? 'Yes' : 'No') + (p.opted_out ? ' <span class="badge b-cancelled">Opted out</span>' : '') + '</td></tr>').join('') + '</tbody></table>' +
+          '<p class="small muted">' + esc(REPLIES_HELP) + '</p>'
         : (all.length ? '<div class="empty">No parents match these filters.</div>' : emptyState('users', 'No parents yet', 'Upload a CSV with each parent\u2019s name, phone, school and class. Use Sample CSV to see the format.', { label: 'Upload CSV', attr: 'data-click="#upload"' }))) + '</div>';
     $('#q').oninput = e => { f.q = e.target.value; const pos = e.target.selectionStart; draw(); const q = $('#q'); q.focus(); q.setSelectionRange(pos, pos); };
     $('#f-inst').onchange = e => { f.institution = e.target.value; f.class_or_year = ''; f.section = ''; draw(); };
     $('#f-lvl').onchange = e => { f.class_or_year = e.target.value; f.section = ''; draw(); };
     $('#f-sec').onchange = e => { f.section = e.target.value; draw(); };
     $('#hard').onchange = e => { f.hard = e.target.checked; draw(); };
-    $('#sample').onclick = () => { const m = modal('<h2>Sample CSV</h2><p class="small muted">Copy into a file named parents.csv (UTF-8). Required: parent_name, phone, institution, class_or_year.</p><pre id="csv">' + esc(SAMPLE_CSV) + '</pre><div class="actions"><button class="btn" id="cp">Copy</button><button class="btn" id="x">Close</button></div>'); $('#x', m).onclick = m.close; $('#cp', m).onclick = () => { navigator.clipboard.writeText(SAMPLE_CSV).then(() => toast('Copied'), () => toast('Select and copy manually', true)); }; };
+    $('#sample').onclick = () => { const m = modal('<h2>Sample CSV</h2><p class="small muted">Download it and open it in Excel, or copy it into a file named parents.csv (UTF-8). Required: parent_name, phone, institution, class_or_year, has_whatsapp (yes or no). language can be en, hi or ta (blank means English).</p><pre id="csv">' + esc(SAMPLE_CSV) + '</pre><div class="actions"><a class="btn primary" id="dl" style="text-decoration:none;display:inline-block" download="parents.csv" href="' + sampleCsvHref() + '">Download (opens in Excel)</a><button class="btn" id="cp">Copy</button><button class="btn" id="x">Close</button></div>'); $('#x', m).onclick = m.close; $('#cp', m).onclick = () => { navigator.clipboard.writeText(SAMPLE_CSV).then(() => toast('Copied'), () => toast('Select and copy manually', true)); }; };
     $('#upload').onclick = () => $('#file').click();
     $('#file').onchange = e => {
       const file = e.target.files[0]; if (!file) return;
@@ -848,20 +888,22 @@ function groupDialog(all, isDelete) {
     const levels = s.inst ? tally(all.filter(p => p.institution === s.inst), p => p.class_or_year, () => 1) : [];
     const secs = s.lvl ? tally(all.filter(p => p.institution === s.inst && p.class_or_year === s.lvl), p => p.section, () => 1) : [];
     const n = all.filter(p => p.institution === s.inst && (!s.lvl || p.class_or_year === s.lvl) && (!s.sec || p.section === s.sec)).length;
+    const nText = n + (n === 1 ? ' parent' : ' parents');
+    const college = !!all.find(p => p.institution === s.inst && p.institution_type === 'college'); // colleges have no sections
     $('#gd', m).innerHTML = '<h2>' + (isDelete ? 'Delete group' : 'Move group (year-end promotion)') + '</h2>' +
       (isDelete ? '<p class="muted small">Removes every parent in the group and their message history.</p>' : '<p class="muted small">Move highest class first (e.g. 7 \u2192 8 before 6 \u2192 7).</p>') +
       '<label>School / college</label><select id="g-i"><option value="">Choose\u2026</option>' + insts.map(i => opt(i.value, i.value, i.value === s.inst)).join('') + '</select>' +
       '<label>Class / year' + (isDelete ? ' (empty = whole institution)' : '') + '</label><select id="g-l" ' + (s.inst ? '' : 'disabled') + '><option value="">' + (isDelete ? 'All' : 'Choose\u2026') + '</option>' + levels.map(i => opt(i.value, i.value, i.value === s.lvl)).join('') + '</select>' +
-      '<label>Section (empty = all)</label><select id="g-s" ' + (s.lvl ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === s.sec)).join('') + '</select>' +
-      (isDelete ? '' : '<div class="grid2"><div><label>New class / year</label><input id="g-nl"></div><div><label>New section (only when moving one section)</label><input id="g-ns"></div></div>') +
-      (s.inst ? '<p class="small">' + n + ' parents affected.</p>' : '') + '<div id="gerr"></div>' +
+      '<label>Section ' + (college ? '(colleges have no sections)' : '(empty = all)') + '</label><select id="g-s" ' + (s.lvl && !college ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === s.sec)).join('') + '</select>' +
+      (isDelete ? '' : '<div class="grid2"><div><label>New class / year</label><input id="g-nl"></div><div><label>New section (only when moving one section)</label><input id="g-ns" ' + (college ? 'disabled' : '') + '></div></div>') +
+      (s.inst ? '<p class="small">' + nText + ' affected.</p>' : '') + '<div id="gerr"></div>' +
       '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn ' + (isDelete ? 'danger' : 'primary') + '" id="go" ' + (s.inst ? '' : 'disabled') + '>' + (isDelete ? 'Delete' : 'Move') + '</button></div>';
     $('#g-i', m).onchange = e => { s.inst = e.target.value; s.lvl = ''; s.sec = ''; draw(); };
     $('#g-l', m).onchange = e => { s.lvl = e.target.value; s.sec = ''; draw(); };
     $('#g-s', m).onchange = e => { s.sec = e.target.value; draw(); };
     $('#x', m).onclick = m.close;
     $('#go', m).onclick = async () => {
-      if (isDelete && !confirm('Delete ' + n + ' parents permanently?')) return;
+      if (isDelete && !confirm('Delete ' + nText + ' permanently?')) return;
       try {
         const r = isDelete ? await call('parents.deleteGroup', { institution: s.inst, class_or_year: s.lvl || null, section: s.sec || null })
           : await call('parents.move', { source: { institution: s.inst, class_or_year: s.lvl, section: s.sec || null }, class_or_year: $('#g-nl', m).value, section: $('#g-ns', m).value });
@@ -910,7 +952,12 @@ function metaNote(t) {
     (hrs >= 48 ? '<div class="small" style="color:var(--warn)">Longer than the usual 48 hours. Check the template in Twilio (Messaging, Content Template Builder) or ask Twilio support.</div>' : '');
 }
 function syncSummary(r) {
-  return r.checked + ' checked, ' + r.approved + ' approved, ' + r.rejected + ' rejected' + (r.waiting && r.waiting.length ? '. Still waiting: ' + r.waiting.map(w => w.name + ' (' + (META_WORDS[w.status] || w.status).toLowerCase() + ')').join(', ') : '');
+  if (!r.checked) return 'There are no template requests waiting for WhatsApp.';
+  const done = [];
+  if (r.approved) done.push(r.approved + (r.approved === 1 ? ' template was' : ' templates were') + ' approved');
+  if (r.rejected) done.push(r.rejected + (r.rejected === 1 ? ' template was' : ' templates were') + ' rejected');
+  if (done.length) return done.join(' and ') + '.' + (r.waiting && r.waiting.length ? ' The others are still being processed.' : '');
+  return 'Your request is being processed. You will receive an update shortly.';
 }
 
 views.templates = async function () {
