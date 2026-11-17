@@ -365,7 +365,7 @@ var API = {
   'templates.list': function (u, status) { return listTemplates_(u, status); },
   'templates.create': function (u, body) { return createTemplate_(u, body); },
   'templates.retrySubmit': function (u, id) { return retrySubmit_(u, id); },
-  'templates.resubmit': function (u, id, body) { return resubmitTemplate_(u, id, body); },
+  'templates.delete': function (u, id) { return deleteTemplate_(u, id); },
   'templates.import': function (u) { return importTwilioTemplates_(u); },
   'templates.sync': function (u) { return syncPendingTemplates_(); },
   'templates.notifications': function (u) { return templateNotifications_(u); },
@@ -376,6 +376,7 @@ var API = {
   'campaigns.sendBatch': function (u, id) { return sendCampaignBatch_(id, 40000); },
   'campaigns.export': function (u, id) { return exportCampaign_(id); },
   'campaigns.cancel': function (u, id) { return cancelCampaign_(u, id); },
+  'campaigns.delete': function (u, id) { return deleteCampaign_(u, id); },
   'campaigns.retryFailed': function (u, id) { return retryFailed_(u, id); },
   'messages.resolve': function (u, id, outcome) { return resolveMessage_(u, id, outcome); },
   'messages.events': function (u, id) { return eventsForMessage_(id); }
@@ -431,7 +432,7 @@ function cleanFileName_(s) { return String(s).replace(/[\\\/:*?"<>|\[\]#]/g, '-'
 
 function archiveName_(c, t) {
   var when = Utilities.formatDate(new Date(c.created_at), cfg_().APP_TIMEZONE, 'yyyy-MM-dd HHmm');
-  return cleanFileName_('Campaign ' + when + ' – ' + c.audience + ' – ' + (t.name || 'template') + ' (' + String(c.id).slice(0, 8) + ')').slice(0, 150);
+  return cleanFileName_('Campaign ' + when + ' – ' + (c.name ? c.name + ' – ' : '') + c.audience + ' – ' + (t.name || 'template') + ' (' + String(c.id).slice(0, 8) + ')').slice(0, 150);
 }
 
 function eventSummary_(e) {
@@ -455,10 +456,9 @@ function buildArchive_(c, t) {
   var tpls = {}; loadTable_('Templates').forEach(function (x) { tpls[x.id] = x; });
   var msgs = loadTable_('Messages').filter(function (m) { return m.campaign_id === c.id; });
   var byMsg = {}; msgs.forEach(function (m) { byMsg[m.id] = m; });
-  var gone = { parent_name: '(deleted)', phone_e164: '', institution: '', class_or_year: '', section: '', language: '', has_whatsapp: false };
 
   var recipients = msgs.map(function (m) {
-    var p = parents[m.parent_id] || gone, v = tpls[m.template_id] || {};
+    var p = parentForDisplay_(m, parents), v = tpls[m.template_id] || {};
     return { sort: [p.institution, p.class_or_year, p.section || '', p.parent_name], row: [
       p.parent_name, p.child_name || '', p.phone_e164, p.institution, p.class_or_year, p.section || '', p.language,
       p.has_whatsapp ? 'yes' : 'no', v.name ? v.name + ' (' + v.language + ')' : '',
@@ -473,7 +473,7 @@ function buildArchive_(c, t) {
   var timeline = loadTable_('Events').filter(function (e) { return e.message_id && byMsg[e.message_id]; })
     .sort(function (a, b) { return String(a.created_at).localeCompare(String(b.created_at)); })
     .map(function (e) {
-      var p = parents[byMsg[e.message_id].parent_id] || gone;
+      var p = parentForDisplay_(byMsg[e.message_id], parents);
       return [localTime_(e.created_at), p.parent_name, p.phone_e164, e.source, eventSummary_(e), JSON.stringify(e.payload || {})];
     });
 
@@ -488,8 +488,8 @@ function buildArchive_(c, t) {
   });
   var answered = counts.confirmed + counts.declined;
   var summary = [
-    ['Campaign', archiveName_(c, t)], ['Campaign ID', c.id], ['Audience', c.audience], ['School / college', c.institution],
-    ['Class / year', c.class_or_year || 'All'], ['Section', c.section || 'All'],
+    ['Campaign', archiveName_(c, t)], ['Campaign ID', c.id], ['Campaign name', c.name || ''], ['Audience', c.audience], ['School / college', c.institution || 'Several (see Audience)'],
+    ['Class / year', campaignGroups_(c).length > 1 ? 'See Audience' : c.class_or_year || 'All'], ['Section', campaignGroups_(c).length > 1 ? 'See Audience' : c.section || 'All'],
     ['Template', (t.name || '') + ' (' + (t.language || '') + ')'], ['Message text sent', text], ['Template body (raw)', t.body || ''],
     ['Values used', Object.keys(vars).sort(function (a, b) { return a - b; }).map(function (k) { return '{{' + k + '}} = ' + vars[k]; }).join('; ')],
     ['Sent by', senderName_(c.created_by) || ''], ['Created', localTime_(c.created_at)], ['Campaign status', c.status],
@@ -523,7 +523,7 @@ function writeArchiveSheet_(sh, tab) {
 function exportCampaign_(campaignId) {
   var c = findOne_('Campaigns', 'id', campaignId);
   if (!c) throw new ApiError('Campaign not found', null, 404);
-  var t = findOne_('Templates', 'id', c.template_id) || {};
+  var t = campaignTemplate_(c, findOne_('Templates', 'id', c.template_id));
   var data = buildArchive_(c, t), name = archiveName_(c, t), ss;
 
   if (c.archive_url) {
@@ -703,6 +703,60 @@ function audienceLabel_(institution, type, classOrYear, section) {
   return parts.join(' · ');
 }
 
+/** The template of a campaign for display: the current row, or the copy saved on the campaign if it was deleted. */
+function campaignTemplate_(c, t) {
+  return t || { name: c.template_name || '(deleted template)', language: c.template_language || '', body: c.template_body || '', has_confirm_buttons: !!c.template_has_buttons };
+}
+
+/** The parent of a message for display: the current row, or the copy saved on the message if the parent was deleted. */
+function parentForDisplay_(m, parents) {
+  return parents[m.parent_id] || { parent_name: m.parent_name || '(deleted)', child_name: m.child_name || '', phone_e164: m.phone_e164 || '',
+    institution: '', class_or_year: '', section: '', language: '', has_whatsapp: false, opted_out: false };
+}
+
+/** The groups a campaign went to. Older campaigns have one group in institution / class_or_year / section. */
+function campaignGroups_(c) {
+  if (c.groups && c.groups.length) return c.groups;
+  return [{ institution: c.institution, class_or_year: c.class_or_year || null, section: c.section || null }];
+}
+
+/** Clean the groups picked on the page: a school is required, and a section only counts inside a class. */
+function cleanGroups_(list) {
+  var seen = {}, out = [];
+  (list || []).forEach(function (g) {
+    var inst = String((g && g.institution) || '').trim();
+    if (!inst) throw new ApiError('Choose a school or college.');
+    var cy = String(g.class_or_year || '').trim() || null;
+    var sec = cy ? (String(g.section || '').trim() || null) : null;
+    var key = [inst, cy || '', sec || ''].join('\u0001');
+    if (!seen[key]) { seen[key] = true; out.push({ institution: inst, class_or_year: cy, section: sec }); }
+  });
+  if (!out.length) throw new ApiError('Choose at least one school or college.');
+  return out;
+}
+
+/** "School A: Class 7 (A, B), Class 8 · School B" */
+function groupsLabel_(groups, typeOf) {
+  var insts = [], byInst = {};
+  groups.forEach(function (g) {
+    if (!byInst[g.institution]) { byInst[g.institution] = []; insts.push(g.institution); }
+    byInst[g.institution].push(g);
+  });
+  return insts.map(function (inst) {
+    var gs = byInst[inst];
+    if (gs.some(function (g) { return !g.class_or_year; })) return inst; // the whole school
+    var word = typeOf[inst] === 'college' ? 'Year ' : 'Class ', classes = [], secs = {};
+    gs.forEach(function (g) {
+      if (!secs[g.class_or_year]) { secs[g.class_or_year] = []; classes.push(g.class_or_year); }
+      secs[g.class_or_year].push(g.section);
+    });
+    return inst + ': ' + classes.map(function (cy) {
+      var list = secs[cy];
+      return word + cy + (list.indexOf(null) >= 0 ? '' : ' (' + list.join(', ') + ')');
+    }).join(', ');
+  }).join(' \u00b7 ');
+}
+
 /** Approved templates with the same name (ignoring _v2...) and placeholders; newest per language. */
 function languageVersions_(template, all) {
   var base = stripVersion_(template.name), nums = placeholderNumbers_(template.body).join(',');
@@ -736,25 +790,33 @@ function createCampaign_(user, body) {
       variables[String(n)] = v;
     });
 
-    var institution = String(body.institution || '').trim();
-    if (!institution) throw new ApiError('Choose a school or college.');
-    var cy = String(body.class_or_year || '').trim() || null;
-    var section = cy ? (String(body.section || '').trim() || null) : null; // a section only makes sense inside a class
+    var groups = cleanGroups_(body.groups || [body]); // body.groups: [{institution, class_or_year, section}]
+    // Each parent is checked once, so a parent who matches two picked groups still gets one message.
     var parents = loadTable_('Parents').filter(function (p) {
-      return !p.opted_out && inGroup_(p, institution, cy, section);
+      return !p.opted_out && groups.some(function (g) { return inGroup_(p, g.institution, g.class_or_year, g.section); });
     });
-    if (!parents.length) throw new ApiError('No parents found in this group.');
+    if (!parents.length) throw new ApiError('No parents found in the chosen groups.');
+    var typeOf = {}; parents.forEach(function (p) { typeOf[p.institution] = p.institution_type; });
+    var one = groups.length === 1 ? groups[0] : null;
+    var sameInst = groups.every(function (g) { return g.institution === groups[0].institution; });
 
     var cid = newId_(), now = nowIso_();
     insertRows_('Campaigns', [{
-      id: cid, template_id: template.id, audience: audienceLabel_(institution, parents[0].institution_type, cy, section),
-      institution: institution, class_or_year: cy, section: section, variables: variables,
-      created_by: user.email, status: 'sending', created_at: now
+      id: cid, template_id: template.id,
+      audience: one ? audienceLabel_(one.institution, typeOf[one.institution], one.class_or_year, one.section) : groupsLabel_(groups, typeOf),
+      // The single-group columns stay filled when they still describe the whole campaign.
+      institution: sameInst ? groups[0].institution : null, class_or_year: one ? one.class_or_year : null, section: one ? one.section : null,
+      groups: groups, variables: variables, created_by: user.email, status: 'sending', created_at: now,
+      name: String(body.name || '').trim().slice(0, 100) || null, // optional; the audience is shown when empty
+      // A copy for display only, so the campaign still shows its template after the template is deleted.
+      template_name: template.name, template_language: template.language, template_body: template.body, template_has_buttons: template.has_confirm_buttons
     }]);
     var versions = languageVersions_(template, tpls);
     insertRows_('Messages', parents.map(function (p) {
       return { id: newId_(), campaign_id: cid, parent_id: p.id, template_id: (versions[p.language] || template).id,
-        status: 'queued', updated_at: now };
+        status: 'queued', updated_at: now,
+        // A copy for display only, so past campaigns still show who it went to after a parent is deleted.
+        parent_name: p.parent_name, child_name: p.child_name || null, phone_e164: p.phone_e164 };
     }));
     return { id: cid, message_count: parents.length };
   });
@@ -764,11 +826,13 @@ function listCampaigns_(user, f) {
   f = f || {};
   var offset = Number(f.offset) || 0;
   var rows = loadTable_('Campaigns').filter(function (c) {
-    if (f.institution && c.institution !== f.institution) return false;
-    // A filter also matches campaigns sent to a wider group (class 7 shows whole-school sends).
-    if (f.class_or_year && c.class_or_year && c.class_or_year !== f.class_or_year) return false;
-    if (f.section && c.section && c.section !== f.section) return false;
-    return true;
+    return campaignGroups_(c).some(function (g) {
+      if (f.institution && g.institution !== f.institution) return false;
+      // A filter also matches campaigns sent to a wider group (class 7 shows whole-school sends).
+      if (f.class_or_year && g.class_or_year && g.class_or_year !== f.class_or_year) return false;
+      if (f.section && g.section && g.section !== f.section) return false;
+      return true;
+    });
   }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
   var page = rows.slice(offset, offset + CAMPAIGN_PAGE_SIZE);
   if (!page.length) return [];
@@ -778,7 +842,7 @@ function listCampaigns_(user, f) {
   var admins = {}; loadTable_('Admins').forEach(function (a) { admins[a.email] = a; });
   return page.map(function (c) {
     delete c._row;
-    c.template_name = (tpls[c.template_id] || {}).name;
+    c.template_name = campaignTemplate_(c, tpls[c.template_id]).name;
     c.sender = ((admins[c.created_by] || {}).full_name) || c.created_by;
     c.counts = countByStatus_(ids[c.id]);
     return c;
@@ -788,17 +852,17 @@ function listCampaigns_(user, f) {
 function getCampaign_(user, id, status) {
   var c = findOne_('Campaigns', 'id', id);
   if (!c) throw new ApiError('Campaign not found', null, 404);
-  var t = findOne_('Templates', 'id', c.template_id) || {};
+  var t = campaignTemplate_(c, findOne_('Templates', 'id', c.template_id));
   var parents = {}; loadTable_('Parents').forEach(function (p) { parents[p.id] = p; });
   var all = loadTable_('Messages').filter(function (m) { return m.campaign_id === id; });
   var counts = countByStatus_(all);
   var msgs = status ? all.filter(function (m) { return m.status === status; }) : all;
   var now = Date.now();
   msgs = msgs.map(function (m) {
-    var p = parents[m.parent_id] || { parent_name: '(deleted)', phone_e164: '', has_whatsapp: false, opted_out: false, language: 'en' };
+    var p = parentForDisplay_(m, parents);
     m.parents = { parent_name: p.parent_name, child_name: p.child_name, phone_e164: p.phone_e164,
-      has_whatsapp: p.has_whatsapp, opted_out: p.opted_out, language: p.language };
-    m.call_due_at = nextCallTime_(m, p, c.status, now);
+      has_whatsapp: p.has_whatsapp, opted_out: p.opted_out, language: p.language, deleted: !parents[m.parent_id] };
+    m.call_due_at = parents[m.parent_id] ? nextCallTime_(m, p, c.status, now) : null; // no calls to a deleted parent
     delete m._row;
     return m;
   });
@@ -819,6 +883,21 @@ function cancelCampaign_(user, id) {
     stopped.forEach(function (m) { m.status = 'cancelled'; m.updated_at = nowIso_(); });
     saveRows_('Messages', stopped);
     return { stopped: stopped.length };
+  });
+}
+
+/** Delete a campaign's rows (Campaigns, Messages, Events). A Drive export, if any, is kept. Stop a sending campaign first. */
+function deleteCampaign_(user, id) {
+  return withLock_(function () {
+    var c = findOne_('Campaigns', 'id', id);
+    if (!c) throw new ApiError('Campaign not found', null, 404);
+    if (c.status === 'sending') throw new ApiError('This campaign is still sending. Stop it first, then delete it.');
+    var msgs = loadTable_('Messages'), ids = {};
+    msgs.forEach(function (m) { if (m.campaign_id === id) ids[m.id] = true; });
+    replaceTable_('Messages', msgs.filter(function (m) { return !ids[m.id]; }));
+    deleteEventRows_(function (ev) { return ids[ev.message_id]; });
+    deleteRow_('Campaigns', c);
+    return { deleted: 1, messages: Object.keys(ids).length };
   });
 }
 
@@ -970,8 +1049,8 @@ function tick_() {
   return result;
 }
 
-/** Every 5 minutes when the app has to ask Twilio for news (no Twilio address), otherwise every 10. */
-function defaultTriggerMinutes_() { return instantUpdates_() ? 10 : 5; }
+/** Every 5 minutes, so missed updates and unfinished campaigns are picked up quickly. */
+function defaultTriggerMinutes_() { return 5; }
 
 function installTriggers(minutes) {
   removeTriggers();
@@ -1008,11 +1087,13 @@ var SCHEMA = {
     ['meta_status', 's'], ['meta_checked_at', 's']],
   Campaigns: [['id', 's'], ['template_id', 's'], ['audience', 's'], ['institution', 's'], ['class_or_year', 's'],
     ['section', 's'], ['variables', 'j'], ['created_by', 's'], ['status', 's'], ['created_at', 's'],
-    ['archive_url', 's'], ['archived_at', 's']],
+    ['archive_url', 's'], ['archived_at', 's'], ['groups', 'j'], ['name', 's'],
+    ['template_name', 's'], ['template_language', 's'], ['template_body', 's'], ['template_has_buttons', 'b']],
   Messages: [['id', 's'], ['campaign_id', 's'], ['parent_id', 's'], ['template_id', 's'], ['status', 's'],
     ['wa_sid', 's'], ['wa_sent_at', 's'], ['wa_error', 's'], ['call_sid', 's'], ['call_requested_at', 's'],
     ['call_status', 's'], ['call_digit', 's'], ['confirmed_via', 's'], ['send_claimed_at', 's'],
-    ['reply_text', 's'], ['replied_at', 's'], ['resolved_by', 's'], ['updated_at', 's']],
+    ['reply_text', 's'], ['replied_at', 's'], ['resolved_by', 's'], ['updated_at', 's'],
+    ['parent_name', 's'], ['child_name', 's'], ['phone_e164', 's']],
   Events: [['id', 's'], ['message_id', 's'], ['source', 's'], ['payload', 'j'], ['created_at', 's'],
     ['processed', 'b']],
 
@@ -1233,6 +1314,18 @@ function isEventProcessed_(id) {
 function setEventMessageId_(id, messageId) {
   var r = eventRowNumber_(id);
   if (r) sheet_(evTable_(id)).getRange(r, 2).setValue(messageId);
+}
+
+/** Delete parent events that match pred, bottom up so row numbers stay valid; runs of rows go in one call. */
+function deleteEventRows_(pred) {
+  var rows = loadTable_('Events').filter(pred).map(function (ev) { return ev._row; }).sort(function (a, b) { return b - a; });
+  var sh = sheet_('Events');
+  for (var i = 0; i < rows.length;) {
+    var j = i;
+    while (j + 1 < rows.length && rows[j + 1] === rows[j] - 1) j++;
+    sh.deleteRows(rows[j], i === j ? 1 : rows[i] - rows[j] + 1);
+    i = j + 1;
+  }
 }
 
 /** The newest `n` events of a table ('Events' or 'DonorEvents'). */
@@ -2838,16 +2931,18 @@ function updateParent_(user, id, body) {
   });
 }
 
-/** Removes parents and their message history (like ON DELETE CASCADE). */
+/**
+ * Removes parents. Their messages stay, so past campaigns keep their counts (the parent shows as "(deleted)").
+ * Messages not sent yet are cancelled, since there is no one left to send them to.
+ */
 function deleteParentsWhere_(pred) {
   var parents = loadTable_('Parents');
   var doomed = {}, keep = [], n = 0;
   parents.forEach(function (p) { if (pred(p)) { doomed[p.id] = true; n++; } else keep.push(p); });
   if (!n) return 0;
   replaceTable_('Parents', keep);
-  var msgs = loadTable_('Messages');
-  var keepMsgs = msgs.filter(function (m) { return !doomed[m.parent_id]; });
-  if (keepMsgs.length !== msgs.length) replaceTable_('Messages', keepMsgs);
+  var unsent = loadTable_('Messages').filter(function (m) { return doomed[m.parent_id] && transition_(m, 'cancelled'); });
+  saveRows_('Messages', unsent);
   return n;
 }
 
@@ -2891,10 +2986,10 @@ function parentHistory_(user, id) {
   var rows = findBy_('Messages', 'parent_id', id);
   rows.sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); });
   return rows.slice(0, 50).map(function (m) {
-    var c = camps[m.campaign_id] || {}, t = tpls[c.template_id] || {};
+    var c = camps[m.campaign_id] || {}, t = campaignTemplate_(c, tpls[c.template_id]);
     return {
       id: m.id, status: m.status, confirmed_via: m.confirmed_via, reply_text: m.reply_text, updated_at: m.updated_at,
-      campaigns: { id: c.id, audience: c.audience, created_at: c.created_at, templates: { name: t.name } }
+      campaigns: { id: c.id, name: c.name, audience: c.audience, created_at: c.created_at, templates: { name: t.name } }
     };
   });
 }
@@ -3139,8 +3234,8 @@ var BUILD_Sender = '20261107-1230'; // build stamp (see Build.gs)
  * is left, and the cron tick finishes any campaign whose browser was closed. A message is "claimed" (under
  * the lock) before it is sent, so two runs never send the same message twice.
  */
-var CLAIM_EXPIRES_MS = 10 * 60 * 1000;
-var RESUME_AFTER_MS = 10 * 60 * 1000;
+var CLAIM_EXPIRES_MS = 7 * 60 * 1000; // longer than Apps Script's 6-minute limit, so a running batch never loses its claim
+var RESUME_AFTER_MS = 3 * 60 * 1000;
 var RESUME_MAX_AGE_MS = 48 * 3600 * 1000;
 var STUCK_AFTER_MS = 30 * 60 * 1000;
 var RECHECK_MAX_AGE_MS = 24 * 3600 * 1000;
@@ -3183,13 +3278,17 @@ function sendItems_(campaign, items) {
   var results = [];
   for (var i = 0; i < items.length; i += c.SEND_CONCURRENCY) {
     var chunk = items.slice(i, i + c.SEND_CONCURRENCY);
+    var reqs = chunk.map(function (it) {
+      return { phone: it.phone, contentSid: sids[it.template_id], variables: campaign.variables, messageId: it.id };
+    });
     var out;
-    try {
-      out = sendWhatsappMany_(chunk.map(function (it) {
-        return { phone: it.phone, contentSid: sids[it.template_id], variables: campaign.variables, messageId: it.id };
-      }));
-    } catch (e) {
-      out = chunk.map(function () { return { error: 'Unexpected error while sending: ' + e.message }; });
+    try { out = sendWhatsappMany_(reqs); }
+    catch (e) {
+      // A network error fails the whole chunk; try once more before marking it failed.
+      // Twilio did not answer, so these were most likely not sent.
+      Utilities.sleep(2000);
+      try { out = sendWhatsappMany_(reqs); }
+      catch (e2) { out = chunk.map(function () { return { error: 'Unexpected error while sending: ' + e2.message }; }); }
     }
     chunk.forEach(function (it, j) { results.push({ id: it.id, res: out[j] }); });
   }
@@ -3711,7 +3810,7 @@ function submitToMeta_(templateId, tbl) {
         saveRows_(tbl, [fresh]);
       });
     }
-    submitWhatsappApproval_(sid, t.name, t.category);
+    submitWhatsappApproval_(sid, t.name, tbl === 'Templates' ? 'UTILITY' : t.category); // parent templates are always UTILITY
   } catch (e) {
     throw new ApiError('Saved as draft, but submitting to WhatsApp failed: ' + e.message + '. Use Retry submit.', null, 502);
   }
@@ -3741,6 +3840,7 @@ function listTemplates_(user, status) {
 }
 
 function createTemplate_(user, body) {
+  body.category = 'UTILITY'; // parent templates are only ever requested as UTILITY
   if (/^donor_/.test(String(body.name || ''))) throw new ApiError('Names starting with donor_ are reserved for the donor department.');
   var errors = validateName_(body.name, body.language || 'en').concat(validateContent_(body));
   if (errors.length) throw new ApiError(errors[0], errors);
@@ -3760,20 +3860,25 @@ function retrySubmit_(user, id) {
   return submitToMeta_(id);
 }
 
-/** Submitted templates cannot be edited in WhatsApp, so create a new version (_v2, _v3 ...). */
-function resubmitTemplate_(user, id, body) {
-  var old = findOne_('Templates', 'id', id);
-  if (!old) throw new ApiError('Template not found', null, 404);
-  if (old.status !== 'approved' && old.status !== 'rejected') throw new ApiError('Only approved or rejected templates can be resubmitted.');
-  var errors = validateContent_(body);
-  if (errors.length) throw new ApiError(errors[0], errors);
-  var newId = withLock_(function () {
-    var base = stripVersion_(old.name), v = 2;
-    while (nameTaken_(base + '_v' + v, old.language)) v++;
-    return insertTemplate_(user, { name: base + '_v' + v, language: old.language, category: body.category, body: body.body,
-      variable_names: body.variable_names, sample_values: body.sample_values, has_confirm_buttons: body.has_confirm_buttons });
+/**
+ * Delete a parent template in the app and in Twilio. Past campaigns keep their results and show the copy saved on them.
+ * Not allowed while a campaign still has messages waiting to be sent with it.
+ */
+function deleteTemplate_(user, id) {
+  var t = findOne_('Templates', 'id', id);
+  if (!t) throw new ApiError('Template not found', null, 404);
+  var busy = loadTable_('Messages').some(function (m) { return m.template_id === id && m.status === 'queued'; });
+  if (busy) throw new ApiError('A campaign is still sending with this template. Wait for it to finish, or stop it, then delete.');
+  if (t.twilio_content_sid) {
+    requireConfig_(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']);
+    try { deleteContent_(t.twilio_content_sid); }
+    catch (e) { throw new ApiError('Could not delete it in Twilio: ' + e.message + '. Nothing was deleted; try again.', null, 502); }
+  }
+  withLock_(function () {
+    var fresh = findOne_('Templates', 'id', id);
+    if (fresh) deleteRow_('Templates', fresh);
   });
-  return submitToMeta_(newId);
+  return { deleted: 1 };
 }
 
 /** Cron + "Check status now": ask Twilio for Meta's decision on every pending template. */
@@ -4029,6 +4134,13 @@ function createContent_(t) {
   return contentRequest_('post', '/Content', {
     friendly_name: t.name, language: t.language, variables: t.sample_values, types: types
   }).sid;
+}
+
+/** DELETE /v1/Content/{sid}. Already gone (404) counts as deleted. */
+function deleteContent_(sid) {
+  var r = httpRetry_(TW_CONTENT + '/Content/' + encodeURIComponent(sid), { method: 'delete', headers: { Authorization: twAuth_() } });
+  var code = r.getResponseCode();
+  if (code >= 400 && code !== 404) throw new Error('Twilio error ' + code + ': ' + twError_(r));
 }
 
 function submitWhatsappApproval_(contentSid, name, category) {
