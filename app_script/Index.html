@@ -505,6 +505,12 @@ function timeAgo(iso) {
   const h = Math.floor(m / 60); if (h < 24) return h + ' h ago';
   const d = Math.floor(h / 24); return d < 7 ? d + ' d ago' : fmtDate(iso);
 }
+// When a status changed: "10:42 AM" today, otherwise "12 Nov, 10:42 AM".
+function statusTime(iso) {
+  if (!iso) return '';
+  const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+  return w.toDateString() === new Date().toDateString() ? t : w.toLocaleDateString(undefined, { day:'numeric', month:'short' }) + ', ' + t;
+}
 function callTime(iso) {
   const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }), n = new Date(), tm = new Date(n); tm.setDate(n.getDate() + 1);
   if (w.toDateString() === n.toDateString()) return 'around ' + t + ' today';
@@ -804,7 +810,7 @@ async function campaignDetail(id, statusFilter) {
     GROUPS.map(g => { const n = gcount(c.counts, g.statuses); return n ? '<span class="chip ' + (group === g.key ? 'on' : '') + '" data-g="' + g.key + '">' + g.label + ' (' + n + ')</span>' : ''; }).join('') + '</div>' +
     '<div class="wa" style="margin-top:6px">' + esc(templateText(c)) + (c.template_has_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div></div>' +
     '<div class="card scroll">' + (msgs.length ? '<table><thead><tr><th>Parent</th><th>Student</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
-      msgs.map(m => '<tr class="click" data-m="' + m.id + '"><td>' + esc(m.parents.parent_name) + '</td><td>' + esc(m.parents.child_name || '') + '</td><td>' + esc(m.parents.phone_e164) + '</td><td>' + badge(m.status) + '</td><td class="small muted">' + esc(messageDetails(m)) + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td></tr>').join('') +
+      msgs.map(m => '<tr class="click" data-m="' + m.id + '"><td>' + esc(m.parents.parent_name) + '</td><td>' + esc(m.parents.child_name || '') + '</td><td>' + esc(m.parents.phone_e164) + '</td><td>' + badge(m.status) + '<div class="small muted" title="' + esc(fmtDate(m.status_at || m.updated_at)) + '">' + esc(statusTime(m.status_at || m.updated_at)) + '</div></td><td class="small muted">' + esc(messageDetails(m)) + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td></tr>').join('') +
       '</tbody></table>' : '<div class="empty">No parents in this view.</div>') + '</div>';
 
   const reload = () => { loading(); return campaignDetail(id); };
@@ -868,7 +874,7 @@ function eventSummary(e) {
 }
 async function messagePanel(c, m, reload) {
   const o = modal('<h2>' + esc(m.parents.parent_name) + '</h2><p class="muted">' + esc(m.parents.child_name ? 'Parent of ' + m.parents.child_name + ' \u00b7 ' : '') + esc(m.parents.phone_e164) + ' \u00b7 ' + esc(m.parents.language) + '</p>' +
-    '<p>' + badge(m.status) + ' <span class="muted small">' + esc(messageDetails(m)) + '</span></p>' +
+    '<p>' + badge(m.status) + ' <span class="muted small">since ' + esc(statusTime(m.status_at || m.updated_at)) + (messageDetails(m) ? ' \u00b7 ' + esc(messageDetails(m)) : '') + '</span></p>' +
     (m.reply_text ? '<p><b>Reply:</b> \u201c' + esc(m.reply_text) + '\u201d <span class="muted small">' + esc(timeAgo(m.replied_at)) + '</span></p>' : '') +
     (m.status !== 'cancelled' ? '<div class="row" style="flex:0 0 auto"><button class="btn" data-r="confirmed">Mark confirmed</button><button class="btn" data-r="declined">Mark declined</button></div><p class="small muted">Use after speaking to the parent personally.</p>' : '') +
     '<h2 style="margin-top:14px">Timeline</h2><ul class="tl" id="tl"><li class="muted">Loading\u2026</li></ul><div class="actions"><button class="btn" id="x">Close</button></div>');

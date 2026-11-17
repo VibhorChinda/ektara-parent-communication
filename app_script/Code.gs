@@ -880,7 +880,7 @@ function cancelCampaign_(user, id) {
     if (!c) throw new ApiError('Campaign not found', null, 404);
     c.status = 'cancelled'; saveRows_('Campaigns', [c]);
     var stopped = loadTable_('Messages').filter(function (m) { return m.campaign_id === id && m.status === 'queued'; });
-    stopped.forEach(function (m) { m.status = 'cancelled'; m.updated_at = nowIso_(); });
+    stopped.forEach(function (m) { m.status = 'cancelled'; m.updated_at = m.status_at = nowIso_(); });
     saveRows_('Messages', stopped);
     return { stopped: stopped.length };
   });
@@ -911,7 +911,7 @@ function retryFailed_(user, id) {
       return m.campaign_id === id && m.status === 'failed' && !m.call_requested_at;
     });
     failed.forEach(function (m) {
-      m.status = 'queued'; m.wa_sid = null; m.wa_sent_at = null; m.wa_error = null; m.send_claimed_at = null; m.updated_at = nowIso_();
+      m.status = 'queued'; m.wa_sid = null; m.wa_sent_at = null; m.wa_error = null; m.send_claimed_at = null; m.updated_at = m.status_at = nowIso_();
     });
     saveRows_('Messages', failed);
     if (failed.length) { c.status = 'sending'; saveRows_('Campaigns', [c]); }
@@ -1093,7 +1093,7 @@ var SCHEMA = {
     ['wa_sid', 's'], ['wa_sent_at', 's'], ['wa_error', 's'], ['call_sid', 's'], ['call_requested_at', 's'],
     ['call_status', 's'], ['call_digit', 's'], ['confirmed_via', 's'], ['send_claimed_at', 's'],
     ['reply_text', 's'], ['replied_at', 's'], ['resolved_by', 's'], ['updated_at', 's'],
-    ['parent_name', 's'], ['child_name', 's'], ['phone_e164', 's']],
+    ['parent_name', 's'], ['child_name', 's'], ['phone_e164', 's'], ['status_at', 's']],
   Events: [['id', 's'], ['message_id', 's'], ['source', 's'], ['payload', 'j'], ['created_at', 's'],
     ['processed', 'b']],
 
@@ -3708,7 +3708,7 @@ function transition_(msg, newStatus, extra) {
   if (ALLOWED_FROM[newStatus].indexOf(msg.status) < 0) return false;
   Object.keys(extra || {}).forEach(function (k) { msg[k] = extra[k]; });
   msg.status = newStatus;
-  msg.updated_at = nowIso_();
+  msg.updated_at = msg.status_at = nowIso_(); // status_at: when the status last changed (shown in the UI)
   return true;
 }
 
@@ -3734,6 +3734,7 @@ function setAdminOutcome_(messageId, outcome, userEmail) {
   var msg = findOne_('Messages', 'id', messageId);
   if (!msg || ADMIN_OUTCOME_FROM.indexOf(msg.status) < 0) return false;
   msg.status = outcome;
+  msg.status_at = nowIso_();
   msg.confirmed_via = 'admin';
   msg.resolved_by = userEmail;
   msg.updated_at = nowIso_();
