@@ -1,13 +1,17 @@
+// English and Indian languages that Meta supports for WhatsApp templates (codes as Meta lists them).
 export const LANGUAGES: Record<string, string> = {
   en: "English",
+  bn: "Bengali",
+  bn_IN: "Bengali (India)",
+  gu: "Gujarati",
   hi: "Hindi",
+  kn: "Kannada",
+  ml: "Malayalam",
+  mr: "Marathi",
+  pa: "Punjabi",
   ta: "Tamil",
   te: "Telugu",
-  kn: "Kannada",
-  mr: "Marathi",
-  bn: "Bengali",
-  gu: "Gujarati",
-  ml: "Malayalam",
+  ur: "Urdu",
 };
 
 export function languageName(code: string): string {
