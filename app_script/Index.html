@@ -551,6 +551,10 @@ function tally(items, keyFn, countFn) {
 }
 const tip = text => '<span class="tip" tabindex="0" data-tip="' + esc(text) + '" aria-label="' + esc(text) + '">?</span>';
 const opt = (v, text, sel) => '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(text) + '</option>';
+// English and Indian languages that Meta supports for WhatsApp templates (codes as Meta lists them).
+const TEMPLATE_LANGUAGES = [['en', 'English'], ['bn', 'Bengali'], ['bn_IN', 'Bengali (India)'], ['gu', 'Gujarati'], ['hi', 'Hindi'], ['kn', 'Kannada'], ['ml', 'Malayalam'],
+  ['mr', 'Marathi'], ['pa', 'Punjabi'], ['ta', 'Tamil'], ['te', 'Telugu'], ['ur', 'Urdu']];
+const languageSelect = (id, sel) => '<select id="' + id + '">' + TEMPLATE_LANGUAGES.map(l => opt(l[0], l[1] + ' (' + l[0] + ')', l[0] === sel)).join('') + '</select>';
 
 // ---------- router ----------
 const state = { info: null, notices: [] };
@@ -1096,7 +1100,7 @@ views['templates/new'] = async function () {
   }
   main().innerHTML = '<p><a href="#" data-go="templates">\u2190 Templates</a></p><div class="head"><h1>Request template</h1></div>' +
     '<div class="card"><div class="grid2"><div><label>Name (lowercase, digits, underscores)' + tip('Used to find the template later, e.g. ptm_reminder. It can\u2019t be changed after submitting.') + '</label><input id="t-name" value="' + esc(s.name) + '" placeholder="ptm_reminder"></div>' +
-    '<div><label>Language' + tip('Language code such as en, hi or ta. Parents get the version in their own language when one exists.') + '</label><input id="t-lang" value="' + esc(s.language) + '" placeholder="en, hi, ta"></div></div>' +
+    '<div><label>Language' + tip('Parents get the version in their own language when one exists.') + '</label>' + languageSelect('t-lang', s.language) + '</div></div>' +
     '<label>Message body</label><textarea id="t-body">' + esc(s.body) + '</textarea>' +
     '<p class="small muted">Use {{1}}, {{2}} \u2026 for values. Don\u2019t start or end with a placeholder or put two next to each other. Max 1024 characters.</p><div id="vars"></div>' +
     '<label class="inline"><input type="checkbox" id="t-btn" ' + (s.buttons ? 'checked' : '') + '> Add Confirm / Can\u2019t attend buttons' + tip('Parents can answer with one tap, and their answer is recorded automatically.') + '</label></div><div id="err"></div>' +
@@ -1505,7 +1509,7 @@ function labelInputs(ph, names, samples, withSamples) {
 }
 function donorTemplateForm() {
   const s = { body: 'Dear {{1}}, thank you for supporting Ek Tara. Your gift of {{2}} will help children learn. We are grateful.', names: ['donor_name', 'amount'], samples: { 1: 'Asha', 2: '\u20b95,000' } };
-  const m = modal('<h2>Request donor template</h2><div class="grid2">' + fld('Name (lowercase, digits, underscores; donor_ is added)', '<input id="t-name" placeholder="donor_thank_you_en">') + fld('Language', '<input id="t-lang" value="en">') +
+  const m = modal('<h2>Request donor template</h2><div class="grid2">' + fld('Name (lowercase, digits, underscores; donor_ is added)', '<input id="t-name" placeholder="donor_thank_you_en">') + fld('Language', languageSelect('t-lang', 'en')) +
     fld('Message type', '<select id="t-type">' + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === 'thank_you')).join('') + '</select>') + fld('Welcome only: written for source', '<select id="t-src">' + opt('', 'Any source', true) + opt('P1', 'P1 trustee lead', false) + opt('P2', 'P2 website lead', false) + opt('P3', 'P3 referral lead', false) + '</select>') + '</div>' +
     fld('Category', '<select id="t-cat">' + opt('UTILITY', 'Utility', true) + opt('MARKETING', 'Marketing', false) + '</select>') + fld('Message body', '<textarea id="t-body">' + esc(s.body) + '</textarea>') +
     '<p class="small muted">Use {{1}}, {{2}} \u2026 Don\u2019t start or end with a placeholder. Photos are not supported yet; put a link in a placeholder.</p><div id="vars"></div><div id="terr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Submit to WhatsApp</button></div>', true);
