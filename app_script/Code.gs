@@ -1064,7 +1064,8 @@ function removeTriggers() {
 // ===== Db.gs =====
 var BUILD_Db = '20261107-1230'; // build stamp (see Build.gs)
 /**
- * Google Sheets as the database. One tab per table, row 1 = headers.
+ * Google Sheets as the database. One tab per table, row 1 = headers. Donor tabs are matched by header name;
+ * parent and access tabs by column position.
  * Types: s=string, b=boolean, j=json, n=number. Everything is stored as plain text
  * so phone numbers like +9198... are never turned into numbers by Sheets.
  *
@@ -1096,25 +1097,24 @@ var SCHEMA = {
   // ---- Donor Communication ----
   Donors: [['id', 's'], ['name', 's'], ['contact_type', 's'], ['phone_e164', 's'], ['email', 's'], ['city', 's'], ['language', 's'],
     ['segment', 's'], ['source_note', 's'], ['whatsapp_opt_in', 'b'], ['opt_in_at', 's'], ['opt_in_source', 's'], ['opted_out', 'b'],
-    ['status', 's'], ['project', 's'], ['core_programme', 's'], ['timeline_start', 's'], ['timeline_end', 's'],
-    ['prior_year_amount', 's'], ['current_status', 's'], ['reporting_frequency', 's'], ['next_report_due', 's'], ['report_link', 's'],
-    ['owner_name', 's'], ['owner_email', 's'], ['trustee_confirmed', 'b'], ['last_donation_date', 's'], ['last_donation_amount', 's'],
-    ['last_update_at', 's'], ['last_message_at', 's'], ['last_message_type', 's'], ['last_message_trigger', 's'],
+    ['status', 's'], ['project', 's'], ['core_programme', 's'],
+    ['owner_name', 's'], ['owner_email', 's'], ['last_donation_date', 's'], ['last_donation_amount', 's'],
+    ['last_message_at', 's'], ['last_message_type', 's'],
     ['notes', 's'], ['created_at', 's'], ['updated_at', 's'],
-    // added later: new columns go at the end so existing sheets keep their data (ensureDonorColumns_ adds them)
-    ['org', 's'], ['reference', 's'], ['email_opt_in', 'b'], ['email_opt_in_at', 's'], ['email_opt_in_source', 's'], ['tags', 'j']],
+    // added later (donor tabs are read by header, so a missing column is simply added to the sheet)
+    ['org', 's'], ['reference', 's'], ['email_opt_in', 'b'], ['email_opt_in_at', 's'], ['email_opt_in_source', 's'], ['tags', 'j'], ['contact_status', 's']],   // contact_status: ACTIVE / INACTIVE (blank = ACTIVE)
   SegmentHistory: [['id', 's'], ['donor_id', 's'], ['from_segment', 's'], ['to_segment', 's'], ['reason', 's'], ['changed_by', 's'], ['changed_at', 's']],
   Donations: [['id', 's'], ['donor_id', 's'], ['campaign_id', 's'], ['amount', 's'], ['donated_on', 's'], ['note', 's'],
     ['recorded_by', 's'], ['recorded_at', 's']],
-  DonorCampaigns: [['id', 's'], ['name', 's'], ['start_date', 's'], ['midpoint_date', 's'], ['end_date', 's'], ['status', 's'],
+  DonorCampaigns: [['id', 's'], ['name', 's'], ['start_date', 's'], ['end_date', 's'], ['status', 's'],
     ['progress_text', 's'], ['results_text', 's'], ['results_ready_at', 's'], ['notes', 's'], ['created_at', 's']],
   DonorBroadcasts: [['id', 's'], ['trigger', 's'], ['kind', 's'], ['name', 's'], ['template_id', 's'], ['campaign_id', 's'],
-    ['segments', 'j'], ['include_ids', 'j'], ['exclude_ids', 'j'], ['values', 'j'], ['send_on', 's'], ['event_date', 's'],
-    ['status', 's'], ['dedupe_key', 's'], ['created_by', 's'], ['approved_by', 's'], ['approved_at', 's'], ['message_count', 'n'],
-    ['created_at', 's'], ['excluded_tags', 'j']],   // excluded_tags added later (ensureDonorColumns_ adds the column)
+    ['segments', 'j'], ['values', 'j'], ['send_on', 's'], ['event_date', 's'],
+    ['status', 's'], ['created_by', 's'], ['approved_by', 's'], ['approved_at', 's'], ['message_count', 'n'],
+    ['created_at', 's'], ['excluded_tags', 'j'], ['channels', 'j']],   // channels: set on approval
   DonorMessages: [['id', 's'], ['donor_id', 's'], ['channel', 's'], ['to_email', 's'], ['template_id', 's'], ['message_type', 's'],
     ['trigger', 's'], ['broadcast_id', 's'], ['campaign_id', 's'], ['donation_id', 's'], ['ref', 's'], ['variables', 'j'],
-    ['priority', 'n'], ['dedupe_key', 's'], ['status', 's'], ['hold_reason', 's'], ['not_before', 's'], ['expires_at', 's'],
+    ['dedupe_key', 's'], ['status', 's'], ['hold_reason', 's'], ['not_before', 's'], ['expires_at', 's'],
     ['send_claimed_at', 's'], ['wa_sid', 's'], ['wa_sent_at', 's'], ['wa_error', 's'], ['reply_text', 's'], ['replied_at', 's'],
     ['created_at', 's'], ['updated_at', 's']],
 
@@ -1165,24 +1165,120 @@ function fileIdOf_(file) {
   try { return ss_().getId(); } catch (e) { return null; }   // before setup(): the one original file
 }
 
+/**
+ * Donor tabs are read and written by header name (row 1), so their columns can be reordered, and the team can add columns
+ * of its own, without breaking anything. Parent and access tabs are still read by column position (unchanged).
+ */
+function byHeader_(name) { return FILE_OF[name] === 'donor'; }
+
 function sheet_(name) {
   if (!sheetCache_[name]) {
     var s = ssFor_(FILE_OF[name] || 'parent').getSheetByName(name);
     if (!s) throw new Error('Sheet "' + name + '" is missing. Run Setup (see SETUP.md).');
-    if (FILE_OF[name] === 'donor') ensureDonorColumns_(s, name);
+    if (byHeader_(name)) { removeDonorColumns_(s, name); sheetCache_['#' + name] = donorHeaders_(s, name); }
     sheetCache_[name] = s;
   }
   return sheetCache_[name];
 }
 
-/** Donor tabs only: when the schema has gained columns, add them (and their headers) to an older sheet so reads and writes keep working without re-running setup. */
-function ensureDonorColumns_(s, name) {
-  var cols = SCHEMA[name], n = cols.length, have = s.getMaxColumns();
-  if (have >= n && String(s.getRange(1, n).getValue()) === cols[n - 1][0]) return;
-  if (have < n) s.insertColumnsAfter(have, n - have);
-  s.getRange(1, 1, s.getMaxRows(), n).setNumberFormat('@');
-  s.getRange(1, 1, 1, n).setValues([cols.map(function (c) { return c[0]; })]).setFontWeight('bold');
+/** "Email Opt-In " and "email_opt_in" are the same header. */
+function headerKey_(h) { return String(h === null || h === undefined ? '' : h).trim().toLowerCase().replace(/[\s\-]+/g, '_'); }
+
+/**
+ * Columns the app no longer uses. They are deleted from the donor sheet once (with their data) to keep it tidy. Reads go by
+ * header, so this is housekeeping only: nothing would break if one stayed.
+ */
+var DONOR_REMOVED_COLUMNS = {
+  Donors: ['next_report_due', 'trustee_confirmed', 'last_update_at', 'last_message_trigger', 'current_status', 'prior_year_amount',
+    'timeline_start', 'timeline_end', 'report_link', 'reporting_frequency'],
+  DonorCampaigns: ['midpoint_date'],
+  DonorBroadcasts: ['include_ids', 'exclude_ids', 'dedupe_key'],
+  DonorMessages: ['priority']
+};
+function removeDonorColumns_(s, name) {
+  var gone = DONOR_REMOVED_COLUMNS[name];
+  if (!gone || s.getLastColumn() < 1) return;
+  var hdr = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  for (var i = hdr.length - 1; i >= 0; i--) if (gone.indexOf(headerKey_(hdr[i])) >= 0) s.deleteColumn(i + 1);
 }
+
+/**
+ * Where each of the app's columns is in a donor tab: { col: {field: column number}, width, segments: [{start, fields}] }.
+ * segments are runs of adjacent app columns, so a save writes only the app's own cells and never the team's columns.
+ * A column the app needs but cannot find is added at the end (and logged); a column that appears twice is an error.
+ */
+function donorHeaders_(s, name) {
+  var width = s.getLastColumn(), hdr = width ? s.getRange(1, 1, 1, width).getValues()[0] : [];
+  var known = {}; SCHEMA[name].forEach(function (c) { known[c[0]] = c; });
+  var col = {}, dup = [];
+  hdr.forEach(function (h, i) {
+    var k = headerKey_(h); if (!known[k]) return;   // the team's own column: left alone
+    if (col[k]) { if (dup.indexOf(k) < 0) dup.push(k); } else col[k] = i + 1;
+  });
+  if (dup.length) throw new Error('The "' + name + '" tab of the donor sheet has the column ' + dup.join(', ') + ' more than once. Delete or rename the extra one, then reload.');
+  var missing = SCHEMA[name].filter(function (c) { return !col[c[0]]; });
+  if (missing.length) {
+    if (s.getMaxColumns() < width + missing.length) s.insertColumnsAfter(s.getMaxColumns(), width + missing.length - s.getMaxColumns());
+    missing.forEach(function (c, j) { col[c[0]] = width + j + 1; });
+    s.getRange(1, width + 1, s.getMaxRows(), missing.length).setNumberFormat('@');
+    s.getRange(1, width + 1, 1, missing.length).setValues([missing.map(function (c) { return c[0]; })]).setFontWeight('bold');
+    if (width) console.warn('Donor sheet, tab "' + name + '": added missing column(s) ' + missing.map(function (c) { return c[0]; }).join(', ') + ' at the end.');
+    width += missing.length;
+  }
+  var order = SCHEMA[name].slice().sort(function (a, b) { return col[a[0]] - col[b[0]]; }), segments = [];
+  order.forEach(function (c) {
+    var last = segments[segments.length - 1];
+    if (last && col[c[0]] === last.start + last.fields.length) last.fields.push(c); else segments.push({ start: col[c[0]], fields: [c] });
+  });
+  return { col: col, width: width, segments: segments };
+}
+
+/**
+ * Owner tool: make every donor tab hold exactly the columns the app uses, in the app's order. Every other column is deleted
+ * with its data (including columns the team added). A backup copy of the whole donor file is made first; if that fails,
+ * nothing is changed. Returns a short report. Run from the donor Overview page ("Tidy sheet columns") or from the editor.
+ */
+function tidyDonorSheets() {
+  var ss = ssFor_('donor'), backup;
+  if (!PropertiesService.getScriptProperties().getProperty(FILE_PROP.donor)) throw new Error('The donor file has not been set up yet. Run setup first.');
+  try { backup = DriveApp.getFileById(ss.getId()).makeCopy(ss.getName() + ' (backup before tidy ' + todayStr_() + ')'); }
+  catch (e) { throw new Error('Could not make a backup copy of the donor file, so nothing was changed: ' + e.message); }
+  var report = withLock_(function () {
+    sheetCache_ = {};
+    var lines = [];
+    Object.keys(FILE_OF).filter(function (n) { return FILE_OF[n] === 'donor'; }).forEach(function (name) {
+      var sh = ss.getSheetByName(name); if (!sh) return;
+      removeDonorColumns_(sh, name);
+      var h = donorHeaders_(sh, name), cols = SCHEMA[name], lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
+      var hdr = sh.getRange(1, 1, 1, lastCol).getValues()[0], keep = {};
+      cols.forEach(function (c) { keep[h.col[c[0]]] = true; });
+      var dropped = [], unnamed = 0;
+      hdr.forEach(function (x, i) { if (keep[i + 1]) return; if (String(x).trim()) dropped.push(String(x).trim()); else unnamed++; });
+      var data = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+      var grid = [cols.map(function (c) { return c[0]; })].concat(data.map(function (r) { return cols.map(function (c) { return r[h.col[c[0]] - 1]; }); }));
+      sh.clearContents();
+      if (sh.getMaxColumns() > cols.length) sh.deleteColumns(cols.length + 1, sh.getMaxColumns() - cols.length);
+      sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+      sh.getRange(1, 1, grid.length, cols.length).setValues(grid);
+      sh.getRange(1, 1, 1, cols.length).setFontWeight('bold');
+      sh.setFrozenRows(1);
+      var moved = hdr.filter(function (x, i) { return keep[i + 1]; }).map(headerKey_).join() !== grid[0].join();
+      lines.push(name + ': ' + (dropped.length || unnamed ? 'removed ' + dropped.concat(unnamed ? [unnamed + ' unnamed column(s)'] : []).join(', ') : 'no extra columns') +
+        (moved ? '; columns put back in order' : ''));
+    });
+    sheetCache_ = {};
+    return lines;
+  }, 60000);
+  var msg = 'Donor sheet tidied. Backup: ' + backup.getName() + '.\n' + report.join('\n');
+  console.log(msg); toast_('Donor sheet tidied. A backup copy was made first.');
+  return { backup_url: backup.getUrl(), backup_name: backup.getName(), report: report };
+}
+
+function hdr_(name) { sheet_(name); return sheetCache_['#' + name]; }
+/** Column number (1-based) of a field. */
+function colOf_(name, field) { return byHeader_(name) ? hdr_(name).col[field] : fieldNames_(name).indexOf(field) + 1; }
+/** How many columns to read for a whole row. */
+function widthOf_(name) { return byHeader_(name) ? hdr_(name).width : SCHEMA[name].length; }
 
 function newId_() { return Utilities.getUuid(); }
 
@@ -1203,25 +1299,26 @@ function toCell_(v, type) {
 
 function fieldNames_(name) { return SCHEMA[name].map(function (c) { return c[0]; }); }
 
+/** One sheet row (all its cells, in sheet order) as an object. Donor tabs: by header; others: by position. */
 function rowFromValues_(name, vals, rowNumber) {
-  var cols = SCHEMA[name], o = { _row: rowNumber };
-  for (var j = 0; j < cols.length; j++) o[cols[j][0]] = fromCell_(vals[j], cols[j][1]);
+  var cols = SCHEMA[name], o = { _row: rowNumber }, col = byHeader_(name) ? hdr_(name).col : null;
+  for (var j = 0; j < cols.length; j++) o[cols[j][0]] = fromCell_(vals[col ? col[cols[j][0]] - 1 : j], cols[j][1]);
   return o;
 }
 
 function loadTable_(name) {
-  var sh = sheet_(name), last = sh.getLastRow(), n = SCHEMA[name].length, rows = [];
+  var sh = sheet_(name), last = sh.getLastRow(), n = widthOf_(name), idCol = colOf_(name, SCHEMA[name][0][0]) - 1, rows = [];
   if (last < 2) return rows;
   var vals = sh.getRange(2, 1, last - 1, n).getValues();
   for (var i = 0; i < vals.length; i++) {
-    if (vals[i][0] === '' || vals[i][0] === null) continue;
+    if (vals[i][idCol] === '' || vals[i][idCol] === null) continue;   // a row without an id is not a record
     rows.push(rowFromValues_(name, vals[i], i + 2));
   }
   return rows;
 }
 
 function loadRowAt_(name, rowNumber) {
-  var vals = sheet_(name).getRange(rowNumber, 1, 1, SCHEMA[name].length).getValues()[0];
+  var vals = sheet_(name).getRange(rowNumber, 1, 1, widthOf_(name)).getValues()[0];
   return rowFromValues_(name, vals, rowNumber);
 }
 
@@ -1230,8 +1327,7 @@ function findBy_(name, field, value) {
   if (value === null || value === undefined || value === '') return [];
   var sh = sheet_(name), last = sh.getLastRow();
   if (last < 2) return [];
-  var idx = fieldNames_(name).indexOf(field);
-  var cells = sh.getRange(2, idx + 1, last - 1, 1).createTextFinder(String(value))
+  var cells = sh.getRange(2, colOf_(name, field), last - 1, 1).createTextFinder(String(value))
     .matchEntireCell(true).matchCase(true).findAll();
   return cells.map(function (c) { return loadRowAt_(name, c.getRow()); });
 }
@@ -1245,17 +1341,31 @@ function rowToValues_(name, obj) {
   return SCHEMA[name].map(function (c) { return toCell_(obj[c[0]], c[1]); });
 }
 
+/** Donor tabs: write rows from `start`, only into the app's own columns (one call per run of adjacent columns). */
+function writeDonorRows_(name, start, objs, asText) {
+  var sh = sheet_(name), end = start + objs.length - 1;
+  if (end > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), end - sh.getMaxRows() + 100);
+  hdr_(name).segments.forEach(function (seg) {
+    var rng = sh.getRange(start, seg.start, objs.length, seg.fields.length);
+    if (asText) rng.setNumberFormat('@');
+    rng.setValues(objs.map(function (o) { return seg.fields.map(function (c) { return toCell_(o[c[0]], c[1]); }); }));
+  });
+}
+
 /** Write changed rows back (rows must carry _row). Contiguous rows go in one call. */
 function saveRows_(name, rows) {
   if (!rows.length) return;
-  var sh = sheet_(name), n = SCHEMA[name].length;
+  var sh = sheet_(name), n = SCHEMA[name].length, header = byHeader_(name);
   var sorted = rows.slice().sort(function (a, b) { return a._row - b._row; });
   var i = 0;
   while (i < sorted.length) {
     var j = i;
     while (j + 1 < sorted.length && sorted[j + 1]._row === sorted[j]._row + 1) j++;
-    var block = sorted.slice(i, j + 1).map(function (r) { return rowToValues_(name, r); });
-    sh.getRange(sorted[i]._row, 1, block.length, n).setValues(block);
+    if (header) writeDonorRows_(name, sorted[i]._row, sorted.slice(i, j + 1), false);
+    else {
+      var block = sorted.slice(i, j + 1).map(function (r) { return rowToValues_(name, r); });
+      sh.getRange(sorted[i]._row, 1, block.length, n).setValues(block);
+    }
     i = j + 1;
   }
 }
@@ -1264,6 +1374,7 @@ function insertRows_(name, objs) {
   if (!objs.length) return;
   var sh = sheet_(name), n = SCHEMA[name].length, CHUNK = 2000;
   for (var i = 0; i < objs.length; i += CHUNK) {
+    if (byHeader_(name)) { writeDonorRows_(name, sh.getLastRow() + 1, objs.slice(i, i + CHUNK), true); continue; }
     var chunk = objs.slice(i, i + CHUNK).map(function (o) { return rowToValues_(name, o); });
     var start = sh.getLastRow() + 1, end = start + chunk.length - 1;
     if (end > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), end - sh.getMaxRows() + 100);
@@ -1273,9 +1384,14 @@ function insertRows_(name, objs) {
   }
 }
 
-/** Replace all data rows (used for bulk deletes). */
+/** Replace all data rows (used for bulk deletes). Donor tabs: only the app's own columns are cleared and rewritten. */
 function replaceTable_(name, objs) {
   var sh = sheet_(name), last = sh.getLastRow();
+  if (byHeader_(name)) {
+    if (last > 1) hdr_(name).segments.forEach(function (seg) { sh.getRange(2, seg.start, last - 1, seg.fields.length).clearContent(); });
+    if (objs.length) writeDonorRows_(name, 2, objs, true);
+    return;
+  }
   if (last > 1) sh.getRange(2, 1, last - 1, SCHEMA[name].length).clearContent();
   insertRows_(name, objs);
 }
@@ -1296,31 +1412,36 @@ function isDonorId_(id) { return String(id || '').indexOf('d-') === 0; }
 
 /** Append-only; safe without the lock. Returns the event id. division: 'donor' writes to the donor file, anything else to the parent file. */
 function logEvent_(messageId, source, payload, division) {
-  var donor = division === 'donor', id = (donor ? 'd-' : '') + newId_();
-  sheet_(donor ? 'DonorEvents' : 'Events').appendRow([id, messageId || '', source, JSON.stringify(payload || {}), nowIso_(), 'FALSE']);
+  var donor = division === 'donor', id = (donor ? 'd-' : '') + newId_(), tbl = donor ? 'DonorEvents' : 'Events';
+  var ev = { id: id, message_id: messageId || '', source: source, payload: payload || {}, created_at: nowIso_(), processed: false }, row;
+  if (donor) {   // by header: the app's cells in their columns, the team's columns left empty
+    row = []; for (var i = 0; i < widthOf_(tbl); i++) row.push('');
+    SCHEMA[tbl].forEach(function (c) { row[colOf_(tbl, c[0]) - 1] = toCell_(ev[c[0]], c[1]); });
+  } else row = [id, messageId || '', source, JSON.stringify(payload || {}), ev.created_at, 'FALSE'];
+  sheet_(tbl).appendRow(row);   // appendRow is atomic, so this stays safe without the lock
   return id;
 }
 
 function eventRowNumber_(id) {
-  var sh = sheet_(evTable_(id)), last = sh.getLastRow();
+  var tbl = evTable_(id), sh = sheet_(tbl), last = sh.getLastRow();
   if (last < 2) return null;
-  var c = sh.getRange(2, 1, last - 1, 1).createTextFinder(id).matchEntireCell(true).matchCase(true).findNext();
+  var c = sh.getRange(2, colOf_(tbl, 'id'), last - 1, 1).createTextFinder(id).matchEntireCell(true).matchCase(true).findNext();
   return c ? c.getRow() : null;
 }
 
 function markEventProcessed_(id) {
   var r = eventRowNumber_(id);
-  if (r) sheet_(evTable_(id)).getRange(r, 6).setValue('TRUE');
+  if (r) sheet_(evTable_(id)).getRange(r, colOf_(evTable_(id), 'processed')).setValue('TRUE');
 }
 
 function isEventProcessed_(id) {
   var r = eventRowNumber_(id);
-  return r ? String(sheet_(evTable_(id)).getRange(r, 6).getValue()).toUpperCase() === 'TRUE' : true;
+  return r ? String(sheet_(evTable_(id)).getRange(r, colOf_(evTable_(id), 'processed')).getValue()).toUpperCase() === 'TRUE' : true;
 }
 
 function setEventMessageId_(id, messageId) {
   var r = eventRowNumber_(id);
-  if (r) sheet_(evTable_(id)).getRange(r, 2).setValue(messageId);
+  if (r) sheet_(evTable_(id)).getRange(r, colOf_(evTable_(id), 'message_id')).setValue(messageId);
 }
 
 /** Delete parent events that match pred, bottom up so row numbers stay valid; runs of rows go in one call. */
@@ -1341,7 +1462,7 @@ function lastEvents_(n, table) {
   var sh = sheet_(table), last = sh.getLastRow();
   if (last < 2) return [];
   var first = Math.max(2, last - n + 1);
-  var vals = sh.getRange(first, 1, last - first + 1, 6).getValues();
+  var vals = sh.getRange(first, 1, last - first + 1, widthOf_(table)).getValues();
   return vals.map(function (v, i) { return rowFromValues_(table, v, first + i); });
 }
 
@@ -1371,12 +1492,11 @@ function divisionOfPhone_(phone) {
 var BUILD_DonorApi = '20261107-1230'; // build stamp (see Build.gs)
 /** API methods of the Donor workspace. Every name starts with "donor." so the permission service requires donor access. */
 function donorOverview_() {
-  var today = todayStr_(), donors = loadTable_('Donors'), seg = {}, optedIn = 0, awaitingTrustee = 0;
+  var donors = loadTable_('Donors'), seg = {}, optedIn = 0;
   SEGMENT_CODES.forEach(function (s) { seg[s] = 0; });
   donors.forEach(function (d) {
     seg[d.segment] = (seg[d.segment] || 0) + 1;
     if (d.whatsapp_opt_in && !d.opted_out) optedIn++;
-    if (d.segment === 'P1' && !d.trustee_confirmed && !d.opted_out) awaitingTrustee++;
   });
   var q = { queued: 0, held: 0, awaiting_confirmation: 0, failed: 0, sent_7d: 0 }, weekAgo = Date.now() - 7 * 86400000;
   loadTable_('DonorMessages').forEach(function (m) {
@@ -1386,19 +1506,16 @@ function donorOverview_() {
   var tpls = loadTable_('DonorTemplates').filter(function (t) { return t.status === 'approved'; });
   var haveType = {}; tpls.forEach(function (t) { haveType[t.message_type] = true; });
   return {
-    ready: true, total: donors.length, opted_in: optedIn, awaiting_trustee: awaitingTrustee, segments: seg, queue: q,
+    ready: true, total: donors.length, opted_in: optedIn, segments: seg, queue: q,
     drafts: loadTable_('DonorBroadcasts').filter(function (b) { return b.status === 'draft'; })
       .map(function (b) { return { id: b.id, name: b.name, trigger: b.trigger, send_on: b.send_on }; }),
-    reports_due: donors.filter(function (d) { return d.segment === 'D1' && d.next_report_due && d.next_report_due <= addDaysStr_(today, 14); })
-      .sort(function (a, b) { return String(a.next_report_due).localeCompare(String(b.next_report_due)); })
-      .map(function (d) { return { id: d.id, name: d.name, next_report_due: d.next_report_due, has_link: !!d.report_link, has_owner_email: !!d.owner_email }; }),
     missing_templates: Object.keys(MESSAGE_TYPES).filter(function (t) { return !haveType[t]; }).map(function (t) { return MESSAGE_TYPES[t]; })
   };
 }
 
 function donorMeta_() {
   return { segments: SEGMENTS, message_types: MESSAGE_TYPES, auto_labels: AUTO_LABELS, kinds: { general_update: 'General update (T8)', special_update: 'Special update (T11)',
-    festive_greeting: 'Festive greeting (T12)', campaign_update: 'Campaign update (T4 / T5)' }, exempt: EXEMPT_TYPES, cap_days: UPDATE_CAP_DAYS };
+    festive_greeting: 'Festive greeting (T12)' }, manual_modes: MANUAL_MODES };
 }
 
 /** Why the donor workspace is not ready, in plain words ('' when it is). */
@@ -1419,7 +1536,8 @@ function retryDonorTemplate_(user, id) {
 }
 
 var DONOR_API = {
-  'donor.home': function (u) { return donorReady_() ? donorOverview_() : { ready: false, message: 'The donor workspace needs a one-time setup.', problem: donorSetupProblem_(), build_problem: buildProblems_(), can_setup: !!u.owner, planned: [] }; },
+  'donor.tidySheets': function (u) { if (!u.owner) throw new ApiError('Only the project owner can tidy the donor sheet.', null, 403); return tidyDonorSheets(); },
+  'donor.home': function (u) { return donorReady_() ? Object.assign(donorOverview_(), { is_owner: !!u.owner }) : { ready: false, message: 'The donor workspace needs a one-time setup.', problem: donorSetupProblem_(), build_problem: buildProblems_(), can_setup: !!u.owner, planned: [] }; },
   'donor.meta': function (u) { return donorMeta_(); },
   'donor.tags': function (u) { return donorTags_(); },
   'donor.donors.list': function (u, f) { return listDonors_(u, f); },
@@ -1428,9 +1546,10 @@ var DONOR_API = {
   'donor.donors.import': function (u, csv) { var r = importDonors_(u, csv); runDonorTriggers_(); return r; },
   'donor.donors.setOptIn': function (u, id, v) { return setOptIn_(u, id, v); },
   'donor.donors.setOptedOut': function (u, id, v) { return setOptedOut_(u, id, v); },
-  'donor.donors.confirmTrustee': function (u, id) { return confirmTrustee_(u, id); },
   'donor.donors.changeSegment': function (u, id, to, reason) { var r = changeSegment_(u, id, to, reason); runDonorTriggers_(); return r; },
-  'donor.donors.delete': function (u, id) { return deleteDonor_(u, id); },
+  'donor.donors.setActive': function (u, id, on) { return setContactActive_(u, id, !!on); },
+  'donor.donors.logContact': function (u, id, body) { return logContact_(u, id, body); },
+  'donor.donors.deleteLog': function (u, msgId) { return deleteContactLog_(u, msgId); },
   'donor.donations.record': function (u, id, body) { return recordDonation_(u, id, body); },
   'donor.donations.update': function (u, id, body) { return updateDonation_(u, id, body); },
   'donor.donations.delete': function (u, id) { return deleteDonation_(u, id); },
@@ -1446,7 +1565,7 @@ var DONOR_API = {
   'donor.broadcasts.list': function (u) { return listBroadcasts_(); },
   'donor.broadcasts.save': function (u, id, body) { return saveBroadcast_(u, id, body); },
   'donor.broadcasts.preview': function (u, id) { return previewBroadcast_(u, id); },
-  'donor.broadcasts.approve': function (u, id) { return approveBroadcast_(u, id); },
+  'donor.broadcasts.approve': function (u, id, opts) { return approveBroadcast_(u, id, opts); },
   'donor.broadcasts.cancel': function (u, id) { return cancelBroadcast_(u, id); },
   'donor.broadcasts.delete': function (u, id) { return deleteDraftBroadcast_(u, id); },
   'donor.messages.list': function (u, f) { return listDonorMessages_(u, f); },
@@ -1519,12 +1638,28 @@ function cleanTags_(v, allowNoTag) {
   return out.slice(0, allowNoTag ? 500 : MAX_TAGS);
 }
 
+/** A contact is active unless its contact_status says INACTIVE (blank counts as active, so older rows stay active). */
+function isActive_(d) { return String((d && d.contact_status) || 'ACTIVE').toUpperCase() !== 'INACTIVE'; }
+
+/** ACTIVE / INACTIVE from a CSV cell: true / false, null when blank, undefined when not understood. */
+function parseActive_(raw) {
+  var v = String(raw === null || raw === undefined ? '' : raw).trim().toLowerCase();
+  if (!v) return null;
+  if (['active', 'yes', 'y', 'true', '1'].indexOf(v) >= 0) return true;
+  if (['inactive', 'no', 'n', 'false', '0', 'deactivated'].indexOf(v) >= 0) return false;
+  return undefined;
+}
+
+/** Can get WhatsApp: opted in, has not replied STOP, and has a phone number. */
+function waReady_(d) { return !!(d && d.whatsapp_opt_in && !d.opted_out && d.phone_e164); }
+
 function donorTagList_(d) { return Array.isArray(d && d.tags) ? d.tags : []; }
 
 /** Every tag in use, per segment, with how many donors carry it; also how many donors in each segment have no tag. */
 function donorTags_() {
   var segs = {}, names = {};
   loadTable_('Donors').forEach(function (d) {
+    if (!isActive_(d)) return;   // inactive contacts get no broadcasts
     var s = segs[d.segment] || (segs[d.segment] = { tags: {}, untagged: 0 }), t = donorTagList_(d);
     if (!t.length) s.untagged++;
     t.forEach(function (x) { var k = String(x).toLowerCase(); names[k] = names[k] || String(x); s.tags[names[k]] = (s.tags[names[k]] || 0) + 1; });
@@ -1536,10 +1671,8 @@ function donorTags_() {
 function cleanDonor_(f) {
   var name = strOrNull_(f.name);
   if (!name) return { error: 'name is empty' };
-  var phoneRaw = strOrNull_(f.phone);
-  if (!phoneRaw) return { error: 'phone is empty' };
-  var phone = normalizePhone_(phoneRaw);
-  if (!phone) return { error: "invalid phone number '" + phoneRaw + "'" };
+  var phoneRaw = strOrNull_(f.phone), phone = null;   // optional: a contact may be reachable by email only
+  if (phoneRaw) { phone = normalizePhone_(phoneRaw); if (!phone) return { error: "invalid phone number '" + phoneRaw + "'" }; }
   var seg = String(f.segment || '').trim().toUpperCase();
   if (SEGMENT_CODES.indexOf(seg) < 0) return { error: "segment must be one of " + SEGMENT_CODES.join(', ') + ", got '" + (f.segment || '') + "'" };
   var email = strOrNull_(f.email);
@@ -1548,20 +1681,17 @@ function cleanDonor_(f) {
   if (ownerEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail)) return { error: "invalid owner_email '" + ownerEmail + "'" };
   var dates = {};
   var bad = null;
-  ['next_report_due', 'last_donation_date', 'timeline_start', 'timeline_end'].forEach(function (k) {
+  ['last_donation_date'].forEach(function (k) {
     if (strOrNull_(f[k]) === null) { dates[k] = null; return; }
     var d = parseDateInput_(f[k]);
     if (!d) bad = k + " is not a valid date ('" + f[k] + "')"; else dates[k] = d;
   });
   if (bad) return { error: bad };
-  var freq = strOrNull_(f.reporting_frequency);
   return { row: {
     name: name, contact_type: strOrNull_(f.contact_type), phone_e164: phone, email: email, city: strOrNull_(f.city),
     language: (strOrNull_(f.language) || 'en').toLowerCase(), segment: seg, source_note: strOrNull_(f.source_note),
     status: strOrNull_(f.status), project: strOrNull_(f.project), core_programme: strOrNull_(f.core_programme),
-    timeline_start: dates.timeline_start, timeline_end: dates.timeline_end, prior_year_amount: strOrNull_(f.prior_year_amount),
-    current_status: strOrNull_(f.current_status), reporting_frequency: freq, next_report_due: dates.next_report_due,
-    report_link: strOrNull_(f.report_link), owner_name: strOrNull_(f.owner_name), owner_email: ownerEmail,
+    owner_name: strOrNull_(f.owner_name), owner_email: ownerEmail,
     last_donation_date: dates.last_donation_date, notes: strOrNull_(f.notes),
     org: strOrNull_(f.org), reference: strOrNull_(f.reference),
     tags: (function (t) { return t.length ? t : null; })(cleanTags_(f.tags))
@@ -1573,13 +1703,12 @@ var DONOR_CSV_ALIASES = {
   name: ['name', 'donor_name', 'donor'], phone: ['phone', 'contact_number', 'contact', 'mobile', 'phone_number', 'whatsapp'],
   email: ['email'], segment: ['segment'], contact_type: ['contact_type', 'type', 'donor_type'], city: ['city'], language: ['language'],
   source_note: ['source_note', 'source', 'how_they_came_to_us'], status: ['status', 'donor_status'], project: ['project'],
-  core_programme: ['core_programme', 'programme', 'core_program'], timeline_start: ['timeline_start', 'timeline_-_start'],
-  timeline_end: ['timeline_end', 'timeline_-_end'], prior_year_amount: ['prior_year_amount', 'adv_donation_2025-26', 'adv_donation_2025_26'],
-  current_status: ['current_status', 'status_2026-27', 'status_2026_27'], reporting_frequency: ['reporting_frequency', 'reportng_frequency'],
-  next_report_due: ['next_report_due'], report_link: ['report_link'], owner_name: ['owner_name', 'owner'], owner_email: ['owner_email'],
+  core_programme: ['core_programme', 'programme', 'core_program'],
+  owner_name: ['owner_name', 'owner'], owner_email: ['owner_email'],
   last_donation_date: ['last_donation_date'], notes: ['notes', 'note'], whatsapp_opt_in: ['whatsapp_opt_in', 'whatsapp_opt-in', 'opt_in', 'optin'],
   org: ['org', 'organisation', 'organization', 'company'], reference: ['reference', 'referred_by', 'referral'],
-  email_opt_in: ['email_opt_in', 'email_opt-in', 'email_optin'], tags: ['tags', 'tag', 'labels']
+  email_opt_in: ['email_opt_in', 'email_opt-in', 'email_optin'], tags: ['tags', 'tag', 'labels'],
+  contact_status: ['contact_status', 'contact_active', 'active']
 };
 
 function headerIndex_(header) {
@@ -1598,8 +1727,8 @@ function importDonors_(user, csvText) {
   try { table = Utilities.parseCsv(String(csvText || '').replace(/^\uFEFF/, '')); } catch (e) { throw new ApiError('File must be a UTF-8 CSV'); }
   if (!table.length) throw new ApiError('The file is empty.');
   var idx = headerIndex_(table[0]);
-  var missing = ['name', 'phone', 'segment'].filter(function (c) { return idx[c] === undefined; });
-  if (missing.length) throw new ApiError('Missing columns: ' + missing.join(', ') + '. Each row needs name, phone and segment (P0 testing, P1 to P5, D1, D2).');
+  var missing = ['name', 'segment'].filter(function (c) { return idx[c] === undefined; });
+  if (missing.length) throw new ApiError('Missing columns: ' + missing.join(', ') + '. Each row needs a name and a segment (P0 testing, P1 to P5, D1, D2); the phone is optional.');
   var rows = [], rejected = [], seen = {};
   for (var i = 1; i < table.length; i++) {
     var cells = table[i], rowNumber = i + 1;
@@ -1612,16 +1741,22 @@ function importDonors_(user, csvText) {
     if (optIn === undefined) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: "whatsapp_opt_in must be yes/no, got '" + rec.whatsapp_opt_in + "'" }); continue; }
     var emailOptIn = parseYesNo_(rec.email_opt_in);
     if (emailOptIn === undefined) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: "email_opt_in must be yes/no, got '" + rec.email_opt_in + "'" }); continue; }
-    if (seen[res.row.phone_e164]) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: 'duplicate phone, already in row ' + seen[res.row.phone_e164] }); continue; }
-    seen[res.row.phone_e164] = rowNumber;
-    rows.push({ data: res.row, optIn: optIn, emailOptIn: emailOptIn, rowNumber: rowNumber, phone: rec.phone || null });
+    var active = parseActive_(rec.contact_status);
+    if (active === undefined) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: "contact_status must be active or inactive, got '" + rec.contact_status + "'" }); continue; }
+    // a contact is matched by phone, or by email when it has no phone
+    var key = res.row.phone_e164 || (res.row.email ? 'email:' + res.row.email.toLowerCase() : null);
+    if (key && seen[key]) { rejected.push({ row: rowNumber, phone: rec.phone || null, reason: 'duplicate ' + (res.row.phone_e164 ? 'phone' : 'email') + ', already in row ' + seen[key] }); continue; }
+    if (key) seen[key] = rowNumber;
+    rows.push({ data: res.row, optIn: optIn, emailOptIn: emailOptIn, active: active, rowNumber: rowNumber, phone: rec.phone || null });
   }
   return withLock_(function () {
-    var byPhone = {}; loadTable_('Donors').forEach(function (d) { byPhone[d.phone_e164] = d; });
+    var byPhone = {}, byEmail = {};
+    loadTable_('Donors').forEach(function (d) { if (d.phone_e164) byPhone[d.phone_e164] = d; if (d.email) byEmail[String(d.email).toLowerCase()] = byEmail[String(d.email).toLowerCase()] || d; });
     var msgs = loadTable_('DonorMessages'), upd = [], ins = [], hist = [], msgsChanged = [], now = nowIso_();
     rows.forEach(function (r) {
-      var old = byPhone[r.data.phone_e164];
+      var old = r.data.phone_e164 ? byPhone[r.data.phone_e164] : (r.data.email ? byEmail[r.data.email.toLowerCase()] : null);
       if (r.emailOptIn === true && !r.data.email && !(old && old.email)) { rejected.push({ row: r.rowNumber, phone: r.phone, reason: 'email_opt_in is yes but there is no email address' }); return; }
+      if (r.optIn === true && !r.data.phone_e164 && !(old && old.phone_e164)) { rejected.push({ row: r.rowNumber, phone: r.phone, reason: 'whatsapp_opt_in is yes but there is no phone number' }); return; }
       if (old) {
         var keep = { segment: old.segment };
         Object.keys(r.data).forEach(function (k) { if (r.data[k] !== null || ['segment'].indexOf(k) >= 0) old[k] = r.data[k]; });
@@ -1634,11 +1769,13 @@ function importDonors_(user, csvText) {
         if (r.optIn === true && !old.whatsapp_opt_in) { old.whatsapp_opt_in = true; old.opt_in_at = now; old.opt_in_source = 'csv import'; }
         if (r.optIn === false) { old.whatsapp_opt_in = false; }
         if (r.emailOptIn !== null) setEmailOptIn_(old, r.emailOptIn, 'csv import');
+        if (r.active !== null) old.contact_status = r.active ? 'ACTIVE' : 'INACTIVE';
         old.updated_at = now; upd.push(old);
       } else {
         var d = r.data; d.id = newId_(); d.whatsapp_opt_in = r.optIn === true; d.opt_in_at = r.optIn === true ? now : null;
-        d.opt_in_source = r.optIn === true ? 'csv import' : null; d.opted_out = false; d.trustee_confirmed = false;
+        d.opt_in_source = r.optIn === true ? 'csv import' : null; d.opted_out = false;
         d.email_opt_in = false; if (r.emailOptIn === true) setEmailOptIn_(d, true, 'csv import');
+        d.contact_status = r.active === false ? 'INACTIVE' : 'ACTIVE';
         d.created_at = now; d.updated_at = now;
         ins.push(d); hist.push({ id: newId_(), donor_id: d.id, from_segment: null, to_segment: d.segment, reason: 'Added by CSV import', changed_by: user.email, changed_at: now });
       }
@@ -1682,6 +1819,7 @@ function saveDonor_(user, id, body) {
   var emailOptIn = body.email_opt_in === undefined ? undefined : !!body.email_opt_in;
   if (emailOptIn && !res.row.email) throw new ApiError('Add an email address to record email opt-in.');
   var waOptIn = body.whatsapp_opt_in === undefined ? undefined : !!body.whatsapp_opt_in;
+  if (waOptIn && !res.row.phone_e164) throw new ApiError('Add a phone number to record WhatsApp opt-in.');
   return withLock_(function () {
     var clash = findBy_('Donors', 'phone_e164', res.row.phone_e164).filter(function (d) { return d.id !== id; });
     if (clash.length) throw new ApiError('Another donor already has this phone number.');
@@ -1702,7 +1840,7 @@ function saveDonor_(user, id, body) {
       donor.updated_at = now;
       saveRows_('Donors', [donor]);
     } else {
-      donor = res.row; donor.id = newId_(); donor.whatsapp_opt_in = false; donor.opted_out = false; donor.trustee_confirmed = false;
+      donor = res.row; donor.id = newId_(); donor.whatsapp_opt_in = false; donor.opted_out = false; donor.contact_status = 'ACTIVE';
       donor.email_opt_in = false; if (emailOptIn) setEmailOptIn_(donor, true, 'recorded by ' + user.email);
       if (waOptIn) setWhatsAppOptIn_(donor, true, 'recorded by ' + user.email);
       donor.created_at = now; donor.updated_at = now;
@@ -1741,20 +1879,6 @@ function setOptedOut_(user, id, optedOut) {
   });
 }
 
-/** P1 leads get their welcome only after the trustee confirms (T1). */
-function confirmTrustee_(user, id) {
-  return withLock_(function () {
-    var d = findOne_('Donors', 'id', id);
-    if (!d) throw new ApiError('Donor not found', null, 404);
-    d.trustee_confirmed = true; d.updated_at = nowIso_();
-    saveRows_('Donors', [d]);
-    var waiting = loadTable_('DonorMessages').filter(function (m) { return m.donor_id === id && m.status === 'awaiting_confirmation'; });
-    waiting.forEach(function (m) { m.status = 'queued'; m.hold_reason = null; m.updated_at = nowIso_(); });
-    saveRows_('DonorMessages', waiting);
-    return cleanDonorRow_(d);
-  });
-}
-
 function changeSegment_(user, id, to, reason) {
   if (SEGMENT_CODES.indexOf(to) < 0) throw new ApiError('Unknown segment.');
   return withLock_(function () {
@@ -1769,15 +1893,20 @@ function changeSegment_(user, id, to, reason) {
   });
 }
 
-function deleteDonor_(user, id) {
+/** Deactivate (or reactivate) a contact. Nothing is deleted: an inactive contact keeps its history but gets no messages; its waiting ones are cancelled. */
+function setContactActive_(user, id, active) {
   return withLock_(function () {
     var d = findOne_('Donors', 'id', id);
-    if (!d) throw new ApiError('Donor not found', null, 404);
-    [['Donors', 'id'], ['SegmentHistory', 'donor_id'], ['Donations', 'donor_id'], ['DonorMessages', 'donor_id']].forEach(function (p) {
-      var rows = loadTable_(p[0]), keep = rows.filter(function (r) { return r[p[1]] !== id; });
-      if (keep.length !== rows.length) replaceTable_(p[0], keep);
-    });
-    return { deleted: 1 };
+    if (!d) throw new ApiError('Contact not found', null, 404);
+    d.contact_status = active ? 'ACTIVE' : 'INACTIVE'; d.updated_at = nowIso_();
+    saveRows_('Donors', [d]);
+    var cancelled = 0;
+    if (!active) {
+      var open = findBy_('DonorMessages', 'donor_id', id).filter(function (m) { return DONOR_STATUS_OPEN.indexOf(m.status) >= 0; });
+      open.forEach(function (m) { m.status = 'cancelled'; m.hold_reason = 'Contact deactivated by ' + user.email; m.updated_at = nowIso_(); });
+      saveRows_('DonorMessages', open); cancelled = open.length;
+    }
+    return { donor: cleanDonorRow_(d), cancelled: cancelled };
   });
 }
 
@@ -1791,10 +1920,66 @@ function donorDetail_(user, id) {
     var c = cleanDonorRow_(x); c.campaign_name = x.campaign_id && camps[x.campaign_id] ? camps[x.campaign_id].name : null; return c;
   });
   var allMsgs = findBy_('DonorMessages', 'donor_id', id);
-  var messages = allMsgs.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).slice(0, 40).map(function (m) {
+  var messages = allMsgs.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).slice(0, 10).map(function (m) {
     var c = cleanDonorRow_(m); c.template_name = m.template_id && tpls[m.template_id] ? tpls[m.template_id].name : null; return c;
   });
-  return { donor: cleanDonorRow_(d), history: history, donations: donations, messages: messages, message_count: allMsgs.length };   // newest 40 + the total
+  return { donor: cleanDonorRow_(d), history: history, donations: donations, messages: messages, message_count: allMsgs.length };   // newest 10 + the total
+}
+
+// ---------- manual log: calls and conversations the team had with a contact ----------
+/**
+ * Kept in DonorMessages with channel 'manual' and status 'logged', so the contact's Messages list shows them with everything else.
+ * The sender never picks them up (it only takes queued and held messages) and the Queue page leaves them out.
+ * They do move the contact's "last communicated" time.
+ * created_at = when the conversation happened; ref = how; variables = { note, by }.
+ */
+var MANUAL_MODES = { call: 'Phone call', meeting: 'In-person meeting', whatsapp_chat: 'WhatsApp chat', email: 'Email', other: 'Other' };
+var MAX_LOG_NOTE = 2000;
+
+/** The latest communication of a contact: a message that went out, or a logged conversation. Sets last_message_* in memory. */
+function recomputeLastContact_(d, msgs) {
+  var best = null, at = '';
+  msgs.forEach(function (m) {
+    if (m.donor_id !== d.id) return;
+    var t = m.channel === 'manual' ? (m.status === 'logged' ? m.created_at : '') : m.wa_sent_at;
+    if (t && String(t) > at) { at = String(t); best = m; }
+  });
+  d.last_message_at = best ? at : null;
+  d.last_message_type = best ? (best.channel === 'manual' ? MANUAL_MODES[best.ref] || 'Logged conversation' : best.message_type) : null;
+}
+
+function logContact_(user, id, body) {
+  body = body || {};
+  var mode = String(body.mode || '');
+  if (!MANUAL_MODES[mode]) throw new ApiError('Choose how you were in touch.');
+  var when = Date.parse(body.at || '');
+  if (!isFinite(when)) throw new ApiError('Enter when it happened.');
+  if (when > Date.now() + 5 * 60000) throw new ApiError('The time cannot be in the future.');
+  var note = String(body.note || '').trim().slice(0, MAX_LOG_NOTE);
+  return withLock_(function () {
+    var d = findOne_('Donors', 'id', id);
+    if (!d) throw new ApiError('Contact not found', null, 404);
+    var at = new Date(when).toISOString(), now = nowIso_();
+    var m = newDonorMessage_({ donor_id: id, channel: 'manual', message_type: 'manual_log', ref: mode, status: 'logged', expires_at: null,
+      variables: { note: note, by: user.email }, created_at: at, updated_at: now });
+    insertRows_('DonorMessages', [m]);
+    if (!d.last_message_at || at > String(d.last_message_at)) {
+      d.last_message_at = at; d.last_message_type = MANUAL_MODES[mode]; d.updated_at = now;
+      saveRows_('Donors', [d]);
+    }
+    return cleanDonorRow_(m);
+  });
+}
+
+function deleteContactLog_(user, msgId) {
+  return withLock_(function () {
+    var m = findOne_('DonorMessages', 'id', msgId);
+    if (!m || m.channel !== 'manual') throw new ApiError('Only logged conversations can be deleted.', null, 404);
+    deleteRow_('DonorMessages', m);
+    var d = findOne_('Donors', 'id', m.donor_id);
+    if (d) { recomputeLastContact_(d, findBy_('DonorMessages', 'donor_id', d.id)); d.updated_at = nowIso_(); saveRows_('Donors', [d]); }
+    return { deleted: 1 };
+  });
 }
 
 // ---------- donations (T2 thank-you, T3 potential donor becomes donor) ----------
@@ -1812,16 +1997,9 @@ function recordDonation_(user, donorId, body) {
       note: strOrNull_(body.note), recorded_by: user.email, recorded_at: now };
     insertRows_('Donations', [don]);
     if (!d.last_donation_date || date >= d.last_donation_date) { d.last_donation_date = date; d.last_donation_amount = String(amount); }
-    var moved = null;
-    if (POTENTIAL_SEGMENTS.indexOf(d.segment) >= 0) {
-      moved = moveSegment_(d, campaignId ? 'D2' : 'D1', 'T3: first donation recorded', user.email);
-      insertRows_('SegmentHistory', [moved]);
-      saveRows_('DonorMessages', cancelPotentialDonorMessages_(donorId, loadTable_('DonorMessages')));
-    }
-    d.updated_at = now; saveRows_('Donors', [d]);
-    return { donation: cleanDonorRow_(don), segment: d.segment, moved: !!moved };
+    d.updated_at = now; saveRows_('Donors', [d]);   // no automatic thank-you and no segment change (T2 / T3 removed)
+    return { donation: cleanDonorRow_(don), segment: d.segment, moved: false };
   });
-  runDonorTriggers_(); // outside the lock: creates the thank-you message
   return result;
 }
 
@@ -1874,7 +2052,7 @@ function saveDonorCampaign_(user, id, body) {
   var name = strOrNull_(body.name);
   if (!name) throw new ApiError('Give the campaign a name.');
   var dates = {};
-  ['start_date', 'midpoint_date', 'end_date'].forEach(function (k) {
+  ['start_date', 'end_date'].forEach(function (k) {
     if (strOrNull_(body[k]) === null) { dates[k] = null; return; }
     var d = parseDateInput_(body[k]);
     if (!d) throw new ApiError(k.replace('_', ' ') + ' is not a valid date.');
@@ -1885,7 +2063,7 @@ function saveDonorCampaign_(user, id, body) {
     var c = id ? findOne_('DonorCampaigns', 'id', id) : null;
     if (id && !c) throw new ApiError('Campaign not found', null, 404);
     if (!c) c = { id: newId_(), created_at: nowIso_(), results_ready_at: null };
-    c.name = name; c.start_date = dates.start_date; c.midpoint_date = dates.midpoint_date; c.end_date = dates.end_date;
+    c.name = name; c.start_date = dates.start_date; c.end_date = dates.end_date;
     c.progress_text = strOrNull_(body.progress_text); c.results_text = strOrNull_(body.results_text); c.notes = strOrNull_(body.notes);
     c.status = status === 'results_ready' && !c.results_ready_at ? 'closed' : status; // results_ready is set only by markResultsReady_
     if (id) saveRows_('DonorCampaigns', [c]); else insertRows_('DonorCampaigns', [c]);
@@ -1893,7 +2071,7 @@ function saveDonorCampaign_(user, id, body) {
   });
 }
 
-/** T5: the team says results are ready. The evaluator then drafts the result update for everyone who gave. */
+/** The team says results are ready: the results text then fills the campaign_result placeholder of a broadcast linked to the campaign. */
 function markResultsReady_(user, id) {
   var out = withLock_(function () {
     var c = findOne_('DonorCampaigns', 'id', id);
@@ -1903,7 +2081,6 @@ function markResultsReady_(user, id) {
     saveRows_('DonorCampaigns', [c]);
     return cleanDonorRow_(c);
   });
-  runDonorTriggers_();
   return out;
 }
 
@@ -1969,8 +2146,8 @@ function importDonorTemplates_(user) {
   return r;
 }
 
-// ---------- broadcasts (T8 quarterly, T11 special, T12 festive, T4/T5 campaign updates) ----------
-var BROADCAST_KINDS = { general_update: 'T8', special_update: 'T11', festive_greeting: 'T12', campaign_update: 'T4' };
+// ---------- broadcasts (T8 general, T11 special, T12 festive). T4 campaign updates were removed. ----------
+var BROADCAST_KINDS = { general_update: 'T8', special_update: 'T11', festive_greeting: 'T12' };
 
 function cleanBroadcast_(b) {
   if (!BROADCAST_KINDS[b.kind]) throw new ApiError('Choose what kind of message this is.');
@@ -1982,7 +2159,7 @@ function cleanBroadcast_(b) {
   if (strOrNull_(b.event_date) && !eventDate) throw new ApiError('The festival date is not valid.');
   var values = {}; Object.keys(b.values || {}).forEach(function (k) { var v = String(b.values[k] || '').trim(); if (v) values[labelKey_(k)] = v; });
   return { name: name, kind: b.kind, template_id: strOrNull_(b.template_id), campaign_id: strOrNull_(b.campaign_id), segments: segs,
-    include_ids: b.include_ids || [], exclude_ids: b.exclude_ids || [], values: values, send_on: sendOn, event_date: eventDate,
+    values: values, send_on: sendOn, event_date: eventDate,
     excluded_tags: cleanTags_(b.excluded_tags, true) };
 }
 
@@ -1995,7 +2172,7 @@ function saveBroadcast_(user, id, body) {
     // A field the caller did not send keeps its value (system drafts arrive with a date and campaign already set).
     if (b) ['send_on', 'event_date', 'campaign_id', 'excluded_tags'].forEach(function (k) { if (body[k] === undefined) c[k] = b[k]; });
     if (!b) b = { id: newId_(), trigger: BROADCAST_KINDS[c.kind], status: 'draft',
-      dedupe_key: null, created_by: user.email, approved_by: null, approved_at: null, message_count: 0, created_at: nowIso_() };
+      created_by: user.email, approved_by: null, approved_at: null, message_count: 0, created_at: nowIso_() };
     Object.keys(c).forEach(function (k) { b[k] = c[k]; });
     if (id) saveRows_('DonorBroadcasts', [b]); else insertRows_('DonorBroadcasts', [b]);
     return cleanDonorRow_(b);
@@ -2021,16 +2198,12 @@ function listBroadcasts_() {
   });
 }
 
-/** Who a broadcast goes to (segments + chosen donors + for a campaign update the campaign's donors): only donors it can reach (WhatsApp opt-in and no STOP, or email opt-in with an address). withUnreachable also returns the rest. */
+/** Who a broadcast goes to (the chosen segments, after the tag filter): only donors it can reach (WhatsApp opt-in and no STOP, or email opt-in with an address). withUnreachable also returns the rest. */
 function broadcastAudience_(b, donors, donations, withUnreachable) {
-  var ex = {}; (b.exclude_ids || []).forEach(function (x) { ex[x] = true; });
-  var ids = {}, tagOk = broadcastTagOk_(b);
+  var ids = {}, tagOk = broadcastTagOk_(b);   // segments (with the tag filter) only; a linked campaign adds no donors
   (b.segments || []).forEach(function (s) { donors.forEach(function (d) { if (d.segment === s && tagOk(d)) ids[d.id] = true; }); });
-  (b.include_ids || []).forEach(function (x) { ids[x] = true; });
-  // only a campaign update goes to the campaign's donors; any other kind can be linked to a campaign just for the record
-  if (b.campaign_id && b.kind === 'campaign_update') donations.forEach(function (x) { if (x.campaign_id === b.campaign_id) ids[x.donor_id] = true; });
   var out = [];
-  donors.forEach(function (d) { if (ids[d.id] && !ex[d.id] && (withUnreachable || reachable_(d))) out.push(d); });
+  donors.forEach(function (d) { if (ids[d.id] && isActive_(d) && (withUnreachable || reachable_(d))) out.push(d); });
   return out;
 }
 
@@ -2048,7 +2221,7 @@ function broadcastTagOk_(b) {
   };
 }
 
-function reachable_(d) { return (!!d.whatsapp_opt_in && !d.opted_out) || emailReady_(d); }
+function reachable_(d) { return waReady_(d) || emailReady_(d); }
 
 function broadcastContext_() {
   var ctx = { donations: loadTable_('Donations'), campaignsById: {}, donationsById: {} };
@@ -2066,13 +2239,13 @@ function previewBroadcast_(user, id) {
   var tpl = b.template_id ? findOne_('DonorTemplates', 'id', b.template_id) : null;
   var out = { count: aud.length, template: tpl ? { name: tpl.name, status: tpl.status, message_type: tpl.message_type } : null,
     no_optin: aud.filter(function (d) { return !d.whatsapp_opt_in; }).length, sample: null, missing: [],
-    by_whatsapp: aud.filter(function (d) { return d.whatsapp_opt_in && !d.opted_out; }).length,
+    by_whatsapp: aud.filter(waReady_).length,
     by_email: aud.filter(emailReady_).length,
     unreachable: all.length - aud.length,   // in the chosen segments but with neither opt-in: left out, no message is created
-    by_tags: (function (ok) { return donors.filter(function (d) { return (b.segments || []).indexOf(d.segment) >= 0 && !ok(d); }).length; })(broadcastTagOk_(b)),
+    by_tags: (function (ok) { return donors.filter(function (d) { return isActive_(d) && (b.segments || []).indexOf(d.segment) >= 0 && !ok(d); }).length; })(broadcastTagOk_(b)),
     // every recipient (the screen groups them by segment) and how many donors each segment has in total
-    recipients: aud.map(function (d) { return { id: d.id, name: d.name, segment: d.segment, phone: d.phone_e164, email_address: d.email, opt_in: !!d.whatsapp_opt_in && !d.opted_out, email: emailReady_(d) }; }),
-    segment_totals: donors.reduce(function (o, d) { o[d.segment] = (o[d.segment] || 0) + 1; return o; }, {}) };
+    recipients: aud.map(function (d) { return { id: d.id, name: d.name, segment: d.segment, phone: d.phone_e164, email_address: d.email, opt_in: waReady_(d), email: emailReady_(d) }; }),
+    segment_totals: donors.reduce(function (o, d) { if (isActive_(d)) o[d.segment] = (o[d.segment] || 0) + 1; return o; }, {}) };   // active contacts
   if (tpl && aud.length) {
     var msg = { variables: b.values, campaign_id: b.campaign_id };
     var missing = {};
@@ -2084,31 +2257,50 @@ function previewBroadcast_(user, id) {
   return out;
 }
 
-function approveBroadcast_(user, id) {
+/** The channels chosen when approving: { whatsapp, email } (both when not given). At least one is needed. */
+function broadcastChannels_(opts) {
+  opts = opts || {};
+  var ch = [];
+  if (opts.whatsapp !== false) ch.push('whatsapp');
+  if (opts.email !== false) ch.push('email');
+  if (!ch.length) throw new ApiError('Choose WhatsApp, email or both.');
+  return ch;
+}
+
+/** A broadcast approved with email turned off gets no email copies, even if a donor opts in to email later. */
+function broadcastSkipsEmail_(b) { return !!(b && b.channels && b.channels.indexOf('email') < 0); }
+
+function approveBroadcast_(user, id, opts) {
+  var channels = broadcastChannels_(opts), byWa = channels.indexOf('whatsapp') >= 0, byEmail = channels.indexOf('email') >= 0;
   var result = withLock_(function () {
     var b = findOne_('DonorBroadcasts', 'id', id);
     if (!b) throw new ApiError('Not found', null, 404);
     if (b.status !== 'draft') throw new ApiError('This was already approved or cancelled.');
+    if (!BROADCAST_KINDS[b.kind]) throw new ApiError('Campaign updates (T4) are no longer sent. Delete this draft, or write a General or Special update instead.');
     var tpl = b.template_id ? findOne_('DonorTemplates', 'id', b.template_id) : null;
     if (!tpl) throw new ApiError('Choose a template first.');
     if (tpl.status !== 'approved') throw new ApiError('That template is not approved by WhatsApp yet.');
     if (tpl.message_type !== b.kind) throw new ApiError('That template is a "' + (MESSAGE_TYPES[tpl.message_type] || 'untyped') + '" template, not a "' + MESSAGE_TYPES[b.kind] + '".');
     var ctx = broadcastContext_(), donors = loadTable_('Donors'), aud = broadcastAudience_(b, donors, ctx.donations);
     if (!aud.length) throw new ApiError(broadcastAudience_(b, donors, ctx.donations, true).length ? 'Nobody in the audience has a WhatsApp or email opt-in.' : 'Nobody is in the audience.');
+    aud = aud.filter(function (d) { return (byWa && waReady_(d)) || (byEmail && emailReady_(d)); });   // only the chosen channels
+    if (!aud.length) throw new ApiError(byWa && byEmail ? 'Nobody in the audience can be reached.' : 'Nobody in the audience has ' + (byWa ? 'a WhatsApp' : 'an email') + ' opt-in.');
     var now = new Date(), notBefore = b.send_on && b.send_on > todayStr_(now) ? startOfDayLocal_(b.send_on).toISOString() : null;
     var expires = b.kind === 'festive_greeting' && (b.event_date || b.send_on) ? startOfDayLocal_(addDaysStr_(b.event_date || b.send_on, 2)).toISOString() : null;
     var existing = {}; loadTable_('DonorMessages').forEach(function (m) { if (m.dedupe_key) existing[m.dedupe_key] = true; });
-    var rows = [];
+    var rows = [], nWa = 0, nEmail = 0;
     aud.forEach(function (d) {
       var key = 'B:' + b.id + ':' + d.id;
-      if (existing[key]) return;
-      rows.push(newDonorMessage_({ donor_id: d.id, template_id: tpl.id, message_type: b.kind, trigger: b.trigger, broadcast_id: b.id, campaign_id: b.campaign_id,
-        variables: b.values, dedupe_key: key, not_before: notBefore, expires_at: expires || undefined }));
+      var f = { donor_id: d.id, template_id: tpl.id, message_type: b.kind, trigger: b.trigger, broadcast_id: b.id, campaign_id: b.campaign_id,
+        variables: b.values, not_before: notBefore, expires_at: expires || undefined };
+      // one message per chosen channel; the email's key is the WhatsApp key + ':email'
+      if (byWa && waReady_(d) && !existing[key]) { rows.push(newDonorMessage_(Object.assign({}, f, { dedupe_key: key }))); nWa++; }
+      if (byEmail && emailReady_(d) && !existing[key + ':email']) { rows.push(newDonorMessage_(Object.assign({}, f, { channel: 'email', to_email: d.email, dedupe_key: key + ':email' }))); nEmail++; }
     });
     insertRows_('DonorMessages', rows);
-    b.status = 'approved'; b.approved_by = user.email; b.approved_at = nowIso_(); b.message_count = rows.length;
+    b.status = 'approved'; b.approved_by = user.email; b.approved_at = nowIso_(); b.message_count = rows.length; b.channels = channels;
     saveRows_('DonorBroadcasts', [b]);
-    return { queued: rows.length, scheduled_for: notBefore ? b.send_on : null };   // a later date waits in the queue; otherwise it sends now
+    return { queued: rows.length, queued_whatsapp: nWa, queued_email: nEmail, channels: channels, scheduled_for: notBefore ? b.send_on : null };   // a later date waits in the queue; otherwise it sends now
   });
   return result;
 }
@@ -2141,8 +2333,8 @@ function listDonorMessages_(user, f) {
   f = f || {};
   var donors = {}; loadTable_('Donors').forEach(function (d) { donors[d.id] = d; });
   var tpls = {}; loadTable_('DonorTemplates').forEach(function (t) { tpls[t.id] = t; });
-  var rows = loadTable_('DonorMessages').filter(function (m) { return !f.status || m.status === f.status; })
-    .sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); }).slice(0, 300);
+  var rows = loadTable_('DonorMessages').filter(function (m) { return m.channel !== 'manual' && (!f.status || m.status === f.status); })   // logged conversations are not in the queue
+    .sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); }).slice(0, 1000);   // the page shows them in pages
   return rows.map(function (m) {
     var o = cleanDonorRow_(m), d = donors[m.donor_id] || {};
     o.donor_name = d.name || '(deleted)'; o.donor_segment = d.segment || ''; o.template_name = m.template_id && tpls[m.template_id] ? tpls[m.template_id].name : null;
@@ -2175,9 +2367,9 @@ function retryDonorMessage_(user, id) {
 var BUILD_DonorEngine = '20261107-1230'; // build stamp (see Build.gs)
 /**
  * Donor Communication engine.
- *   runDonorTriggers_()      reads the donor records and creates the messages the rules call for (T1 to T10).
+ *   runDonorTriggers_()      runs the one automatic rule (T7) and makes the email copies of waiting messages.
  *                            It is safe to run any number of times: every message has a dedupe key.
- *   dispatchDonorBatch_()    decides what may be sent right now (opt-in, 7-day cap) and sends it.
+ *   dispatchDonorBatch_()    decides what may be sent right now (opt-in, template, values) and sends it.
  * Both run from the 10-minute cron tick; the donor screens also call them right after an approval or a donation.
  */
 var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -2186,7 +2378,7 @@ var QUARTER_MONTHS = [1, 4, 7, 10];
 function newDonorMessage_(f) {
   var type = f.message_type, now = nowIso_();
   var m = { id: 'd-' + newId_(), donor_id: null, channel: 'whatsapp', to_email: null, template_id: null, message_type: type, trigger: null,
-    broadcast_id: null, campaign_id: null, donation_id: null, ref: null, variables: null, priority: PRIORITY[type] || 50, dedupe_key: null,
+    broadcast_id: null, campaign_id: null, donation_id: null, ref: null, variables: null, dedupe_key: null,
     status: 'queued', hold_reason: null, not_before: null,
     expires_at: new Date(Date.now() + (type === 'thank_you' ? THANKS_HOLD_DAYS : HOLD_DAYS) * 86400000).toISOString(),
     send_claimed_at: null, wa_sid: null, wa_sent_at: null, wa_error: null, reply_text: null, replied_at: null, created_at: now, updated_at: now };
@@ -2204,86 +2396,19 @@ function loadEngineCtx_() {
     keys: {}, newMsgs: [], newBroadcasts: [], newHistory: [], dirtyDonors: {}, dirtyMsgs: {}, stats: {} };
   ctx.donorsById = byId_(ctx.donors); ctx.campaignsById = byId_(ctx.campaigns);
   ctx.msgs.forEach(function (m) { if (m.dedupe_key) ctx.keys[m.dedupe_key] = true; });
-  ctx.broadcasts.forEach(function (b) { if (b.dedupe_key) ctx.keys[b.dedupe_key] = true; });
   return ctx;
 }
 
 function addMsg_(ctx, f) {
   if (f.dedupe_key && ctx.keys[f.dedupe_key]) return null;
+  if (f.donor_id && ctx.donorsById && ctx.donorsById[f.donor_id] && !isActive_(ctx.donorsById[f.donor_id])) return null;   // inactive contact
   var m = newDonorMessage_(f);
   if (m.dedupe_key) ctx.keys[m.dedupe_key] = true;
   ctx.newMsgs.push(m); ctx.msgs.push(m);
   return m;
 }
 
-function addBroadcastDraft_(ctx, f) {
-  if (ctx.keys[f.dedupe_key]) return null;
-  var b = Object.assign({ id: newId_(), template_id: null, campaign_id: null, segments: [], include_ids: [], exclude_ids: [], values: {}, event_date: null,
-    status: 'draft', created_by: 'system', approved_by: null, approved_at: null, message_count: 0, created_at: nowIso_() }, f);
-  ctx.keys[b.dedupe_key] = true; ctx.newBroadcasts.push(b); ctx.broadcasts.push(b);
-  return b;
-}
-
 function count_(ctx, k) { ctx.stats[k] = (ctx.stats[k] || 0) + 1; }
-
-/** T1: a new potential donor from a trustee, the website or a referral gets a welcome (P1 waits for the trustee to confirm). */
-function triggerT1_(ctx) {
-  ctx.donors.forEach(function (d) {
-    if (['P1', 'P2', 'P3'].indexOf(d.segment) < 0 || (d.opted_out && !emailReady_(d))) return;
-    var wait = d.segment === 'P1' && !d.trustee_confirmed;
-    if (addMsg_(ctx, { donor_id: d.id, message_type: 'welcome', trigger: 'T1', dedupe_key: 'T1:' + d.id,
-      status: wait ? 'awaiting_confirmation' : 'queued', hold_reason: wait ? 'Waiting for the trustee to confirm' : null })) count_(ctx, 'T1');
-  });
-  ctx.msgs.forEach(function (m) {
-    if (m.status !== 'awaiting_confirmation') return;
-    var d = ctx.donorsById[m.donor_id];
-    if (d && d.trustee_confirmed) { m.status = 'queued'; m.hold_reason = null; m.updated_at = nowIso_(); if (m._row) ctx.dirtyMsgs[m.id] = m; }
-  });
-}
-
-/** T2: every recorded donation gets a thank-you (sent even if another message went recently). */
-function triggerT2_(ctx) {
-  ctx.donations.forEach(function (x) {
-    if (!ctx.donorsById[x.donor_id]) return;
-    if (addMsg_(ctx, { donor_id: x.donor_id, message_type: 'thank_you', trigger: 'T2', donation_id: x.id, campaign_id: x.campaign_id, dedupe_key: 'T2:' + x.id })) count_(ctx, 'T2');
-  });
-}
-
-/** T4 / T5: a campaign update is drafted for the team to approve. T4 at the midpoint date, T5 once results are marked ready. */
-function triggerT4T5_(ctx) {
-  ctx.campaigns.forEach(function (c) {
-    if (['planned', 'running'].indexOf(c.status) >= 0 && c.midpoint_date && ctx.today >= c.midpoint_date) {
-      if (addBroadcastDraft_(ctx, { trigger: 'T4', kind: 'campaign_update', name: 'Midpoint update: ' + c.name, campaign_id: c.id, send_on: c.midpoint_date, dedupe_key: 'T4:' + c.id })) count_(ctx, 'T4');
-    }
-    if (c.results_ready_at) {
-      if (addBroadcastDraft_(ctx, { trigger: 'T5', kind: 'campaign_update', name: 'Results update: ' + c.name, campaign_id: c.id, send_on: todayStr_(), dedupe_key: 'T5:' + c.id })) count_(ctx, 'T5');
-    }
-  });
-}
-
-/** T6: after the campaign result update, campaign donors who have not given again move to P5 (quarterly updates). */
-function triggerT6_(ctx) {
-  ctx.campaigns.forEach(function (c) {
-    if (!c.results_ready_at) return;
-    var bc = ctx.broadcasts.filter(function (b) { return b.dedupe_key === 'T5:' + c.id; })[0];
-    if (!bc) return;
-    var ready = Date.parse(c.results_ready_at);
-    ctx.msgs.forEach(function (m) {
-      if (m.broadcast_id !== bc.id) return;
-      var d = ctx.donorsById[m.donor_id];
-      if (!d || d.segment !== 'D2') return;
-      var ref;
-      if (m.wa_sent_at) ref = Date.parse(m.wa_sent_at);
-      else if (['skipped', 'cancelled', 'failed'].indexOf(m.status) >= 0) ref = ready;
-      else return; // the result update has not gone out yet
-      if (ctx.nowMs < ref + P5_MOVE_DELAY_DAYS * 86400000) return;
-      var gaveAgain = ctx.donations.some(function (x) { return x.donor_id === d.id && Date.parse(x.recorded_at) > ready; });
-      if (gaveAgain) return;
-      var h = moveSegment_(d, 'P5', 'T6: no further donation after "' + c.name + '" results', 'system');
-      if (h) { ctx.newHistory.push(h); ctx.dirtyDonors[d.id] = d; count_(ctx, 'T6'); }
-    });
-  });
-}
 
 /** T7: 11 months after the last donation, last year's donors (P4) get an "a year ago you helped" update unless they gave again. */
 function triggerT7_(ctx) {
@@ -2295,43 +2420,35 @@ function triggerT7_(ctx) {
   });
 }
 
-/** T8: a quarterly general update is drafted three weeks before the first week of Jan / Apr / Jul / Oct. The team approves it. */
-function triggerT8_(ctx) {
-  var y = Number(ctx.today.slice(0, 4));
-  [y, y + 1].forEach(function (yr) {
-    QUARTER_MONTHS.forEach(function (mo) {
-      var start = yr + '-' + ('0' + mo).slice(-2) + '-01';
-      if (ctx.today < addDaysStr_(start, -21) || ctx.today > addDaysStr_(start, 30)) return;
-      if (addBroadcastDraft_(ctx, { trigger: 'T8', kind: 'general_update', name: 'General update: ' + MONTH_NAMES[mo - 1] + ' ' + yr,
-        segments: ['P1', 'P2', 'P3', 'P4', 'P5', 'D1'], send_on: start, dedupe_key: 'T8:' + start.slice(0, 7) })) count_(ctx, 'T8');
-    });
-  });
+/**
+ * Messages from rules that no longer exist: T1 welcome, T2 thank-you, T4 campaign update, T9/T10 programme reports.
+ * One that never went out is deleted (it would only clutter the Queue); one that was sent stays as history.
+ */
+var RETIRED_TRIGGERS = ['T1', 'T2', 'T4'], RETIRED_TYPES = ['campaign_update', 'report_reminder', 'programme_report'];
+function retiredUnsent_(m) {
+  return m.channel !== 'manual' && !m.wa_sent_at && (RETIRED_TRIGGERS.indexOf(m.trigger) >= 0 || RETIRED_TYPES.indexOf(m.message_type) >= 0);
 }
 
-/** T9: 7 days before a programme report is due, remind the Ek Tara contact owner (an email, never the donor). */
-function triggerT9_(ctx) {
-  ctx.donors.forEach(function (d) {
-    if (d.segment !== 'D1' || !d.next_report_due || !d.owner_email) return;
-    if (ctx.today < addDaysStr_(d.next_report_due, -7) || ctx.today > d.next_report_due) return;
-    if (addMsg_(ctx, { donor_id: d.id, channel: 'email', to_email: d.owner_email, message_type: 'report_reminder', trigger: 'T9', ref: d.next_report_due,
-      dedupe_key: 'T9:' + d.id + ':' + d.next_report_due })) count_(ctx, 'T9');
-  });
-}
-
-/** T10: on the due date the programme report goes to the programme donor (D1). The next due date is set after it is sent. */
-function triggerT10_(ctx) {
-  ctx.donors.forEach(function (d) {
-    if (d.segment !== 'D1' || !d.next_report_due || (d.opted_out && !emailReady_(d)) || ctx.today < d.next_report_due) return;
-    if (addMsg_(ctx, { donor_id: d.id, message_type: 'programme_report', trigger: 'T10', ref: d.next_report_due,
-      dedupe_key: 'T10:' + d.id + ':' + d.next_report_due })) count_(ctx, 'T10');
-  });
+/** Inside the lock, before anything else reads row numbers: delete the retired, never-sent messages (bottom up, runs of rows in one call). */
+function purgeRetiredDonorMessages_() {
+  var rows = loadTable_('DonorMessages').filter(retiredUnsent_).map(function (m) { return m._row; }).sort(function (a, b) { return b - a; });
+  var sh = sheet_('DonorMessages');
+  for (var i = 0; i < rows.length;) {
+    var j = i;
+    while (j + 1 < rows.length && rows[j + 1] === rows[j] - 1) j++;
+    sh.deleteRows(rows[j], j - i + 1);
+    i = j + 1;
+  }
+  return rows.length;
 }
 
 function runDonorTriggers_() {
   if (!donorReady_()) return { skipped: 'donor sheets not set up' };
   return withLock_(function () {
+    var purged = purgeRetiredDonorMessages_();   // first, so the row numbers loaded below are current
     var ctx = loadEngineCtx_();
-    triggerT1_(ctx); triggerT2_(ctx); triggerT4T5_(ctx); triggerT6_(ctx); triggerT7_(ctx); triggerT8_(ctx); triggerT9_(ctx); triggerT10_(ctx);
+    if (purged) ctx.stats.retired_removed = purged;
+    triggerT7_(ctx);   // the only automatic rule; everything else is a broadcast the team writes and approves
     triggerEmailTwins_(ctx);
     saveRows_('Donors', values_(ctx.dirtyDonors));
     saveRows_('DonorMessages', values_(ctx.dirtyMsgs));
@@ -2361,12 +2478,14 @@ function sendsAsOwner_() {
  * Runs on every trigger pass, so a donor who opts in to email later also gets the copies of messages still waiting.
  */
 function triggerEmailTwins_(ctx) {
+  var bcs = byId_(ctx.broadcasts || []);
   ctx.msgs.slice().forEach(function (m) {
     if (m.channel !== 'whatsapp' || DONOR_STATUS_OPEN.indexOf(m.status) < 0 || !m.dedupe_key) return;
+    if (m.broadcast_id && broadcastSkipsEmail_(bcs[m.broadcast_id])) return;   // approved as WhatsApp only
     var d = ctx.donorsById[m.donor_id];
     if (!emailReady_(d)) return;
     var f = {};
-    ['donor_id', 'template_id', 'message_type', 'trigger', 'broadcast_id', 'campaign_id', 'donation_id', 'ref', 'variables', 'priority',
+    ['donor_id', 'template_id', 'message_type', 'trigger', 'broadcast_id', 'campaign_id', 'donation_id', 'ref', 'variables',
       'status', 'hold_reason', 'not_before', 'expires_at'].forEach(function (k) { f[k] = m[k]; });
     if (f.status === 'held') { f.status = 'queued'; f.hold_reason = null; }   // a WhatsApp hold (e.g. no WhatsApp opt-in) does not apply to email
     f.channel = 'email'; f.to_email = d.email; f.dedupe_key = m.dedupe_key + ':email';
@@ -2377,7 +2496,7 @@ function triggerEmailTwins_(ctx) {
 var DONOR_EMAIL_FROM_NAME = 'Ek Tara';
 var DONOR_EMAIL_SUBJECTS = { welcome: 'Welcome to Ek Tara', general_update: 'An update from Ek Tara', special_update: 'A special update from Ek Tara',
   campaign_update: 'Campaign update from Ek Tara', thank_you: 'Thank you from Ek Tara', festive_greeting: 'Warm wishes from Ek Tara',
-  year_ago_update: 'A year ago, you helped', programme_report: 'Your programme report from Ek Tara' };
+  year_ago_update: 'A year ago, you helped' };
 
 function donorEmailSubject_(m, ctx) {
   var camp = m.campaign_id && ctx.campaignsById ? ctx.campaignsById[m.campaign_id] : null;
@@ -2395,16 +2514,9 @@ function donorEmailHtml_(text) {
 }
 
 // ---------------------------------------------------------------- dispatch
-function nextReportDue_(due, freq, today) {
-  var n = FREQ_MONTHS[String(freq || '').trim().toLowerCase()];
-  if (!n) return null;
-  var next = due;
-  for (var k = 1; k <= 120 && next <= today; k++) next = addMonthsStr_(due, n * k); // from the original date, so 31 Jan does not drift
-  return next;
-}
-
 /**
- * Under the lock: decide what may go out now. Applies opt-in per channel, template, values, then the 7-day cap and priority.
+ * Under the lock: decide what may go out now. Applies opt-in per channel, template and values. There is no frequency cap:
+ * every approved broadcast goes out, however recently the contact got the last one.
  * Emails are claimed only when this runs as the project owner, so they always go from the owner's account; otherwise they wait (email_waiting).
  */
 function claimDonorBatch_(max) {
@@ -2412,9 +2524,8 @@ function claimDonorBatch_(max) {
     var now = new Date(), nowMs = now.getTime(), asOwner = sendsAsOwner_();
     var donors = byId_(loadTable_('Donors')), tpls = byId_(loadTable_('DonorTemplates'));
     var ctx = { campaignsById: byId_(loadTable_('DonorCampaigns')), donationsById: byId_(loadTable_('Donations')) };
-    var all = loadTable_('DonorMessages'), dirty = {}, elig = [], sentBase = {}, hasEmailCopy = {};
+    var all = loadTable_('DonorMessages'), dirty = {}, elig = [], hasEmailCopy = {};
     all.forEach(function (m) {
-      if (m.wa_sent_at) sentBase[baseKey_(m)] = true;
       if (m.channel === 'email' && /:email$/.test(m.dedupe_key || '') && ['cancelled', 'skipped'].indexOf(m.status) < 0) hasEmailCopy[baseKey_(m)] = true;
     });
     function touch(m) { dirty[m.id] = m; }
@@ -2433,6 +2544,7 @@ function claimDonorBatch_(max) {
     }
 
     all.forEach(function (m) {
+      if (retiredUnsent_(m)) return;   // T1 / T2 / T4 / report leftovers: never sent, deleted by the next trigger run
       if (m.status !== 'queued' && m.status !== 'held') return;
       var claimed = m.send_claimed_at ? Date.parse(m.send_claimed_at) : 0;
       if (claimed && nowMs - claimed < DONOR_CLAIM_MS) return;
@@ -2442,10 +2554,7 @@ function claimDonorBatch_(max) {
       if (m.expires_at && Date.parse(m.expires_at) < nowMs) { end(m, 'skipped', 'Expired before it could be sent' + (m.hold_reason ? ' (' + m.hold_reason + ')' : '')); return; }
       var d = donors[m.donor_id];
       if (!d) { end(m, 'cancelled', 'Donor deleted'); return; }
-      if (m.channel === 'email' && m.message_type === 'report_reminder') {   // T9: to the Ek Tara contact owner, not the donor
-        if (!m.to_email) end(m, 'failed', 'No contact-owner email on the donor record'); else elig.push({ m: m, d: d, owner: true, email: true, go: true });
-        return;
-      }
+      if (!isActive_(d)) { end(m, 'cancelled', 'Contact is inactive'); return; }
       if (m.channel === 'email') {                                           // the donor's email copy
         if (!d.email_opt_in) { end(m, 'cancelled', 'Email opt-in removed'); return; }
         if (!d.email) { end(m, 'cancelled', 'No email address on the donor record'); return; }
@@ -2454,33 +2563,17 @@ function claimDonorBatch_(max) {
         return;
       }
       if (d.opted_out) { end(m, 'cancelled', 'Donor opted out of WhatsApp'); return; }       // rule 1
-      if (!d.whatsapp_opt_in) {                                                            // rule 1
-        if (hasEmailCopy[baseKey_(m)]) end(m, 'skipped', 'No WhatsApp opt-in: sent by email only');
-        else hold(m, 'No WhatsApp opt-in recorded');
+      if (!d.whatsapp_opt_in || !d.phone_e164) {                                           // rule 1 (and a phone number to send to)
+        var why = !d.phone_e164 ? 'No phone number' : 'No WhatsApp opt-in';
+        if (hasEmailCopy[baseKey_(m)]) end(m, 'skipped', why + ': sent by email only');
+        else hold(m, !d.phone_e164 ? 'No phone number on the contact' : 'No WhatsApp opt-in recorded');
         return;
       }
       var tw = templateAndValues(m, d); if (!tw) return;
       elig.push({ m: m, d: d, tpl: tw.tpl, vars: tw.vars });
     });
 
-    // rule 2: one update per donor per UPDATE_CAP_DAYS; exempt types always go; on a clash the higher priority wins.
-    // A WhatsApp message and its email copy are one update: they go together, and one may follow once the other has gone.
-    var perDonor = {};
-    elig.forEach(function (e) {
-      if (e.go) return;
-      if (EXEMPT_TYPES.indexOf(e.m.message_type) >= 0 || e.d.segment === TEST_SEGMENT || sentBase[baseKey_(e.m)]) { e.go = true; return; }   // P0: no cap on test sends
-      (perDonor[e.d.id] = perDonor[e.d.id] || []).push(e);
-    });
-    Object.keys(perDonor).forEach(function (id) {
-      var list = perDonor[id].sort(function (a, b) { return (b.m.priority || 0) - (a.m.priority || 0) || String(a.m.created_at).localeCompare(String(b.m.created_at)); });
-      var last = list[0].d.last_update_at ? Date.parse(list[0].d.last_update_at) : 0;
-      var capped = last && nowMs - last < UPDATE_CAP_DAYS * 86400000, first = baseKey_(list[0].m);
-      list.forEach(function (e) {
-        if (capped) hold(e.m, 'Frequency cap: one update per ' + UPDATE_CAP_DAYS + ' days (next allowed ' + new Date(last + UPDATE_CAP_DAYS * 86400000).toISOString().slice(0, 10) + ')');
-        else if (baseKey_(e.m) !== first) hold(e.m, 'Held: a more important message goes to this donor first');
-        else e.go = true;
-      });
-    });
+    elig.forEach(function (e) { e.go = true; });   // no frequency cap (the 7-day rule was removed): every approved message goes
 
     var quota = 0;
     if (asOwner && elig.some(function (e) { return e.go && e.email; })) { try { quota = MailApp.getRemainingDailyQuota(); } catch (err) { quota = 0; } }
@@ -2493,7 +2586,7 @@ function claimDonorBatch_(max) {
       if (e.email) quota--;
       e.m.send_claimed_at = nowIso_(); touch(e.m);
       items.push({ id: e.m.id, donor_id: e.d.id, email: !!e.email, owner: !!e.owner, to_email: e.owner ? e.m.to_email : e.d.email, type: e.m.message_type, trigger: e.m.trigger, ref: e.m.ref,
-        donor_name: e.d.name, report_link: e.d.report_link, phone: e.d.phone_e164, contentSid: e.tpl && e.tpl.twilio_content_sid, vars: e.vars, owner_name: e.d.owner_name,
+        donor_name: e.d.name, phone: e.d.phone_e164, contentSid: e.tpl && e.tpl.twilio_content_sid, vars: e.vars, owner_name: e.d.owner_name,
         subject: e.email && !e.owner ? donorEmailSubject_(e.m, ctx) : null, text: e.email && !e.owner ? renderBody_(e.tpl, e.vars) : null });
     });
     saveRows_('DonorMessages', values_(dirty));
@@ -2512,14 +2605,7 @@ function sendDonorItems_(items) {
   }
   items.filter(function (i) { return i.email; }).forEach(function (it) {
     try {
-      if (it.owner) {
-        MailApp.sendEmail(it.to_email, 'Programme report due ' + it.ref + ': ' + it.donor_name,
-          'Hello' + (it.owner_name ? ' ' + it.owner_name : '') + ',\n\nThe programme report for ' + it.donor_name + ' is due on ' + it.ref + ' (in about 7 days).\n' +
-          (it.report_link ? 'Report link on file: ' + it.report_link + '\n' : 'No report link is on the donor record yet. Please add it so the WhatsApp message can go out on the due date.\n') +
-          '\nThis is an automatic reminder from the Ek Tara communications app.');
-      } else {
-        MailApp.sendEmail({ to: it.to_email, subject: it.subject, name: DONOR_EMAIL_FROM_NAME, body: it.text, htmlBody: donorEmailHtml_(it.text) });
-      }
+      MailApp.sendEmail({ to: it.to_email, subject: it.subject, name: DONOR_EMAIL_FROM_NAME, body: it.text, htmlBody: donorEmailHtml_(it.text) });
       results[it.id] = { sid: 'email' };
     } catch (e) { results[it.id] = { error: 'Email failed: ' + e.message }; }
   });
@@ -2535,15 +2621,10 @@ function saveDonorResults_(items, results) {
       m.send_claimed_at = null; m.updated_at = now; dm[m.id] = m;
       if (!res.sid) { m.status = 'failed'; m.wa_error = res.error; return; }
       m.hold_reason = null; m.wa_error = null; m.wa_sent_at = now;
-      if (it.email) { m.status = 'sent'; m.to_email = it.to_email; if (it.owner) return; }   // the owner's reminder does not count as a message to the donor
+      if (it.email) { m.status = 'sent'; m.to_email = it.to_email; }
       else { m.wa_sid = res.sid; if (['queued', 'held'].indexOf(m.status) >= 0) m.status = 'sent'; } // a callback may already have moved it on
       var d = donors[m.donor_id]; if (!d) return;
-      d.last_message_at = now; d.last_message_type = m.message_type; d.last_message_trigger = m.trigger; d.updated_at = now;   // rule 4
-      if (EXEMPT_TYPES.indexOf(m.message_type) < 0 && d.segment !== TEST_SEGMENT) d.last_update_at = now;
-      if (m.message_type === 'programme_report' && m.ref) {
-        d.next_report_due = nextReportDue_(m.ref, d.reporting_frequency, today) || d.next_report_due; // T10: set the next due date
-        d.report_link = null;
-      }
+      d.last_message_at = now; d.last_message_type = m.message_type; d.updated_at = now;   // shown as Last communicated
       dd[d.id] = d;
     });
     saveRows_('DonorMessages', values_(dm)); saveRows_('Donors', values_(dd));
@@ -2638,31 +2719,23 @@ var SEGMENTS = { P0: 'Testing group', P1: 'Trustee / employee lead', P2: 'Websit
 var POTENTIAL_SEGMENTS = ['P1', 'P2', 'P3', 'P4', 'P5'];
 /**
  * P0 is the team's own test contacts: pick it in a broadcast to check the real message before sending to donors.
- * It is in no automatic trigger or quarterly list, a donation does not move it to D1/D2, and the 7-day cap does not apply to it,
- * so the same people can receive any number of test sends.
+ * It is in no automatic trigger or quarterly list, a donation does not move it to D1/D2.
  */
 var TEST_SEGMENT = 'P0';
 var SEGMENT_CODES = Object.keys(SEGMENTS);
 
-/** The six message types from the metadata sheet, plus two that triggers need (T7 and T10). */
+/** The six message types from the metadata sheet, plus the one T7 needs. */
 var MESSAGE_TYPES = { welcome: 'Welcome', general_update: 'General update', special_update: 'Special update',
-  campaign_update: 'Campaign update', thank_you: 'Thank-you', festive_greeting: 'Festive greeting',
-  year_ago_update: '"A year ago you helped" update (T7)', programme_report: 'Programme report (T10)' };
+  thank_you: 'Thank-you', festive_greeting: 'Festive greeting',
+  year_ago_update: '"A year ago you helped" update (T7)' };
 
-/** Not counted against, and never blocked by, the one-update-per-7-days cap (rule 2). */
-var EXEMPT_TYPES = ['thank_you', 'programme_report', 'report_reminder'];
-/** If two updates clash for one person the higher number is sent and the other is held (rule 2). Edit to change. */
-var PRIORITY = { thank_you: 100, programme_report: 95, report_reminder: 90, campaign_update: 80, special_update: 70,
-  year_ago_update: 65, welcome: 60, general_update: 40, festive_greeting: 30 };
-var UPDATE_CAP_DAYS = 7;
 var HOLD_DAYS = 14;            // an update held longer than this is dropped (a stale update is worse than none)
 var THANKS_HOLD_DAYS = 30;
 var P5_MOVE_DELAY_DAYS = 2;    // T6: after the campaign result update
 var DONOR_CLAIM_MS = 10 * 60 * 1000;
 var DONOR_BATCH = 50;
-var FREQ_MONTHS = { monthly: 1, quarterly: 3, 'half-yearly': 6, 'half yearly': 6, halfyearly: 6, 'six-monthly': 6, annual: 12, annually: 12, yearly: 12 };
 /** Placeholder labels that fill themselves from the donor record. Any other label is typed in per send. */
-var AUTO_LABELS = ['donor_name', 'first_name', 'project', 'core_programme', 'city', 'owner_name', 'report_link', 'last_donation_date',
+var AUTO_LABELS = ['donor_name', 'first_name', 'project', 'core_programme', 'city', 'owner_name', 'last_donation_date',
   'amount', 'donation_date', 'campaign_name', 'campaign_progress', 'campaign_result'];
 
 function donorReady_() {
@@ -2721,7 +2794,6 @@ function autoValue_(key, donor, msg, ctx) {
     case 'core_programme': return donor.core_programme;
     case 'city': return donor.city;
     case 'owner_name': return donor.owner_name;
-    case 'report_link': return donor.report_link;
     case 'last_donation_date': return donor.last_donation_date;
     case 'amount': { var a = don ? don.amount : donor.last_donation_amount; return parseAmount_(a) ? inr_(parseAmount_(a)) : null; }
     case 'donation_date': return don ? don.donated_on : donor.last_donation_date;
@@ -3596,6 +3668,7 @@ function onOpen() {
       .addItem('Show Twilio webhook URLs', 'showWebhookUrls')
       .addItem('Check configuration', 'checkConfig')
       .addItem('Run cron tick now', 'cronTick')
+      .addItem('Tidy donor sheet columns', 'tidyDonorSheets')
       .addToUi();
   } catch (e) { /* not bound to a spreadsheet */ }
 }
@@ -3639,6 +3712,9 @@ function setup() {
   var files = { parent: ensureDatabaseSheet_(), donor: ensureFile_('donor'), access: ensureFile_('access') };
   Object.keys(SCHEMA).forEach(function (name) {
     var ss = files[FILE_OF[name]], cols = SCHEMA[name], sh = ss.getSheetByName(name) || ss.insertSheet(name);
+    if (byHeader_(name)) {   // donor tabs are read by header: keep their columns and order, only add what is missing
+      removeDonorColumns_(sh, name); donorHeaders_(sh, name); sh.setFrozenRows(1); return;
+    }
     if (sh.getMaxColumns() < cols.length) sh.insertColumnsAfter(sh.getMaxColumns(), cols.length - sh.getMaxColumns());
     sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@'); // plain text everywhere
     sh.getRange(1, 1, 1, cols.length).setValues([cols.map(function (c) { return c[0]; })]).setFontWeight('bold');
