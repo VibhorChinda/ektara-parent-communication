@@ -1,0 +1,594 @@
+<!-- JsDonor: Donor Communication screens. Pasted into Index.html by include_(). -->
+<script>
+// ================= Donor Communication workspace =================
+const segTag = c => '<span class="seg ' + (String(c).charAt(0) === 'P' ? 'p' : '') + '" title="' + esc((state.dmeta && state.dmeta.segments[c]) || '') + '">' + esc(c) + '</span>';
+/** The contacts CSV template: the header row only, in the names the upload understands. [column, what to put, required] */
+const DONOR_CSV_COLS = [
+  ['name', 'Full name of the person or organisation contact', true],
+  ['segment', 'P0 (testing group), P1, P2, P3, P4, P5, D1 or D2', true],
+  ['org', 'Company, foundation or trust'],
+  ['contact number', 'Phone for WhatsApp, e.g. 98765 43210 or +44 7911 123456. Used to match an existing contact'],
+  ['email', 'Email address. Matches an existing contact when there is no phone'],
+  ['whatsapp_opt_in', 'yes or no (yes needs a phone number)'],
+  ['email_opt_in', 'yes or no (yes needs an email address)'],
+  ['contact_status', 'active or inactive (blank = active)'],
+  ['city', ''], ['language', 'e.g. en (blank = en)'],
+  ['tags', 'Several separated by ; e.g. csr; education'],
+  ['source', 'How they came to us'], ['reference', 'Who referred them'],
+  ['donor status', 'e.g. Individual, Corporate CSR'], ['owner', 'Ek Tara contact owner'], ['owner_email', ''],
+  ['project', ''], ['core programme', ''],
+  ['last donation date', 'e.g. 2026-11-18'], ['notes', '']
+];
+const DONOR_CSV = DONOR_CSV_COLS.map(c => c[0]).join(',') + '\n';
+/** What each trigger code means, shown when you hover over it. Only T7 still runs on its own; the others are broadcasts you write, or older records. */
+const D_TRIGGERS = {
+  T1: 'T1 Welcome (no longer automatic): a welcome to a new potential donor. Unsent messages left over from it are removed.',
+  T2: 'T2 Thank-you (no longer automatic): a thank-you for a recorded donation. Unsent messages left over from it are removed.',
+  T3: 'T3 Became a donor (no longer automatic): a first donation used to move a potential donor to D1 or D2.',
+  T4: 'T4 Campaign update (removed): updates to a campaign\u2019s donors are no longer sent. Unsent messages left over from it are removed.',
+  T5: 'T5 Campaign results (no longer automatic): a results update used to be drafted when a campaign was marked results ready.',
+  T6: 'T6 Moved to P5 (no longer automatic): campaign donors who had not given again used to move to P5.',
+  T7: 'T7 A year ago: 11 months after their last donation, last year’s donors (P4) get an “a year ago you helped” update, unless they gave again.',
+  T8: 'T8 General update: a broadcast you write for the segments you choose. Needs approval.',
+  T11: 'T11 Special update: a one-off broadcast written by the team. Needs approval.',
+  T12: 'T12 Festive greeting: a greeting for a festival, written by the team. Dropped if not sent within 2 days of the festival.'
+};
+const dTrig = code => { const c = String(code || '').toUpperCase(); return D_TRIGGERS[c] ? '<span class="d-trig" title="' + esc(D_TRIGGERS[c]) + '">' + esc(code) + '</span>' : esc(code || ''); };
+/** Text such as "T3: first donation recorded" with every trigger code in it explained on hover. */
+const dTrigIn = text => esc(text || '').replace(/\bT(1[0-2]|[1-9])\b/g, m => dTrig(m));
+// ---------- tags (donor form and broadcast filter) ----------
+const dTagChip = (t, btn) => '<span class="d-chip" data-t="' + esc(t) + '">' + esc(t) + (btn ? '<button type="button" data-rm-tag aria-label="Remove tag ' + esc(t) + '" title="Remove">×</button>' : '') + '</span>';
+const dTagEditorHtml = tags => '<div style="grid-column:1/-1"><label for="f-tagin">Tags</label><div class="d-tags" id="f-tags">' + (tags || []).map(t => dTagChip(t, true)).join('') +
+  '<input id="f-tagin" list="d-taglist" autocomplete="off" placeholder="Type a tag, press Enter"></div><datalist id="d-taglist"></datalist>' +
+  '<p class="small muted" style="margin:4px 0 0">A donor can have several tags. Broadcasts can then go to only the donors of a segment with certain tags.</p></div>';
+/** Tags in the editor, plus anything still typed in the box. */
+function dTagValues(root) {
+  const box = $('#f-tags', root); if (!box) return [];
+  const out = [], seen = {}, typed = $('#f-tagin', root) ? $('#f-tagin', root).value : '';
+  $$('.d-chip', box).map(c => c.dataset.t).concat(typed.split(/[;,]/)).forEach(t => { t = String(t).replace(/\s+/g, ' ').trim(); if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; out.push(t); } });
+  return out;
+}
+function bindTagEditor(root) {
+  const box = $('#f-tags', root), inp = $('#f-tagin', root); if (!box || !inp) return;
+  const add = raw => String(raw).split(/[;,]/).forEach(t => {
+    t = t.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!t || $$('.d-chip', box).some(c => c.dataset.t.toLowerCase() === t.toLowerCase())) return;
+    inp.insertAdjacentHTML('beforebegin', dTagChip(t, true));
+  });
+  inp.onkeydown = e => {
+    if ((e.key === 'Enter' || e.key === ',' || e.key === ';') && inp.value.trim()) { e.preventDefault(); add(inp.value); inp.value = ''; }
+    else if (e.key === 'Enter') e.preventDefault();
+    else if (e.key === 'Backspace' && !inp.value) { const c = $$('.d-chip', box).pop(); if (c) c.remove(); }
+  };
+  inp.onchange = () => { if (inp.value.trim()) { add(inp.value); inp.value = ''; } };   // picked from the suggestions
+  box.onclick = e => { const b = e.target.closest('[data-rm-tag]'); if (b) { b.closest('.d-chip').remove(); inp.focus(); } else if (e.target === box) inp.focus(); };
+  call('donor.tags').then(t => { const dl = $('#d-taglist', root); if (dl) dl.innerHTML = t.all.map(x => '<option value="' + esc(x) + '">').join(''); }).catch(() => {});
+}
+const dToday = () => { const t = new Date(); return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0'); };
+/** A status badge that copes with an empty status (donor screens). */
+const dBadge = s => s ? badge(s) : '<span class="badge b-cancelled">Unknown</span>';
+const dActive = d => String((d && d.contact_status) || 'ACTIVE').toUpperCase() !== 'INACTIVE';
+const dChannel = g => g.channel !== 'email' ? 'WhatsApp' : g.message_type === 'report_reminder' ? 'Email to owner' : 'Email' + (g.to_email ? ' to ' + g.to_email : '');
+const D_ICON_EDIT = svgi('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>');
+async function dmeta() { if (!state.dmeta) state.dmeta = await call('donor.meta'); return state.dmeta; }
+
+async function driveDonorSend(title) {
+  const m = modal('<div class="busy-modal">' + stringSvg('md') + '<h2>' + (title || 'Sending\u2026') + '</h2><p id="p" class="muted" style="margin:0">Working\u2026</p><p class="small muted" style="margin:0">Only contacts who opted in to WhatsApp or email get messages.</p></div>');
+  m.dataset.noesc = '1';
+  let total = 0, mail = '';
+  try {
+    for (let i = 0; i < 30; i++) {
+      const r = await call('donor.dispatch'); total += r.sent + (r.email_sent || 0);
+      $('#p', m).textContent = total + ' sent' + (r.remaining ? ', ' + r.remaining + ' more\u2026' : '.');
+      if (r.email_by === 'owner' && r.email_sent) mail = 'Emails went from ' + (r.owner || 'the organisation account') + '. ';
+      if (r.email_waiting) mail += r.email_waiting + ' email' + (r.email_waiting === 1 ? '' : 's') + ' will go from ' + (r.owner || 'the organisation account') + ' with the next background run (within 5 minutes). ';
+      if (!r.remaining) break;
+    }
+    await showDone(m, total ? total + ' sent' : (mail ? 'Emails are on their way' : 'Nothing to send right now'), mail + (total ? 'Check the Queue to see the status of each message.' : 'Messages held by the rules stay in the Queue with the reason.'));
+  } finally { m.close(); }
+  return total;
+}
+
+// ---------- overview ----------
+views['donor/home'] = async function () {
+  await dmeta();
+  const d = await call('donor.home');
+  if (!d.ready) {
+    main().innerHTML = '<div class="head"><div><h1>Donor Communication</h1><p class="sub">One step before you can start.</p></div></div><div class="alert info"><b>' + esc(d.message) + '</b>' + (d.problem ? '<br>' + esc(d.problem) : '') + (d.build_problem ? '<br><b>Some files in the project are out of date:</b> ' + esc(d.build_problem) + '. Replace every file from the latest zip.' : '') + '</div>' +
+      '<div class="card">' + (d.layout
+        ? '<p style="margin-top:0">The app reads each column by its position, so nothing is read or saved until the columns are back in this order. Move whole columns (with their data) in the donor Google Sheet, then reload this page. Extra columns of your own may go to the right of these.</p>' +
+          d.expected.map(t => '<details class="d-msgs"><summary>' + esc(t.tab) + ' <span class="muted small">(' + t.columns.length + ' columns)</span></summary><p class="small" style="margin:6px 0 0">' + t.columns.map((c, i) => '<b>' + (i + 1) + '</b> ' + esc(c)).join(' · ') + '</p></details>').join('')
+      : d.can_setup ? '<p style="margin-top:0">You are the project owner, so you can do this now. It creates the donor Google Sheet and its tabs and moves any older donor data into it. It is safe to run again.</p><button class="btn primary" id="setupnow">Set up now</button>'
+        : '<p style="margin:0">Only the project owner can do this. Ask them to open this screen and click <b>Set up now</b>, or to run <b>setup</b> in the Apps Script editor.</p>') + '</div>';
+    const sb = $('#setupnow'); if (sb) sb.onclick = async () => { try { await call('admin.setup'); state.dmeta = null; toast('Setup finished'); views['donor/home'](); } catch (e) { toast(e.message, true); } };
+    return;
+  }
+  const q = d.queue;
+  main().innerHTML = '<div class="head"><div><h1>Donor Communication</h1><p class="sub" style="margin:0">' + d.total + ' contacts \u00b7 ' + d.opted_in + ' with WhatsApp opt-in</p></div>' +
+    '<button class="btn primary" id="sendnow">Send waiting messages now</button></div>' +
+    '<div class="card"><h2>Contacts by segment</h2><div class="tiles">' + Object.keys(state.dmeta.segments).map(c => '<div class="tile" style="cursor:pointer" data-seg="' + c + '"><b data-count="' + (d.segments[c] || 0) + '">' + (d.segments[c] || 0) + '</b>' + segTag(c) + ' ' + esc(state.dmeta.segments[c]) + '</div>').join('') + '</div></div>' +
+    '<div class="card"><h2>Needs attention</h2>' +
+    (d.drafts.length ? '<p><span class="badge b-held">' + d.drafts.length + ' to approve</span> ' + d.drafts.map(x => esc(x.name) + ' <span class="muted small">(' + dTrig(x.trigger) + (x.send_on ? ', send ' + esc(x.send_on) : '') + ')</span>').join('; ') + ' <a href="#" data-go="donor/broadcasts">Review</a></p>' : '') +
+    (q.held ? '<p><span class="badge b-held">' + q.held + ' held</span> (no opt-in, or a missing template or value). <a href="#" data-go="donor/queue">See why</a></p>' : '') +
+    (q.failed ? '<p><span class="badge b-failed">' + q.failed + ' failed</span> <a href="#" data-go="donor/queue">Retry</a></p>' : '') +
+    (d.missing_templates.length ? '<p class="muted">No approved template yet for: ' + d.missing_templates.map(esc).join(', ') + '. <a href="#" data-go="donor/templates">Templates</a></p>' : '') +
+    (!d.drafts.length && !q.held && !q.failed ? '<p class="muted">Nothing needs attention.</p>' : '') + '</div>' +
+    '<p class="small muted">Sent in the last 7 days: ' + q.sent_7d + ' \u00b7 waiting: ' + q.queued + '</p>';
+  $('#sendnow').onclick = async () => { const n = await driveDonorSend(); toast(n + ' messages sent'); views['donor/home'](); };
+  $$('[data-seg]').forEach(t => t.onclick = () => { state.donorFilter = { segment: t.dataset.seg }; go('donor/donors'); });
+  $$('[data-d]').forEach(t => t.onclick = () => donorModal(t.dataset.d));
+};
+
+// ---------- donors ----------
+views['donor/donors'] = async function () {
+  await dmeta();
+  let size = 20; try { size = Number(localStorage.getItem('ektara-contacts-size')) || 20; } catch (e) { /* storage can be blocked */ }
+  const f = Object.assign({ segment: '', q: '', optin: '', email_optin: '', active: 'yes', page: 1, size: [10, 20, 50, 100].indexOf(size) >= 0 ? size : 20 }, state.donorFilter || {}); state.donorFilter = null;
+  let upload = window.__donorUpload || null; window.__donorUpload = null;
+  const all = await call('donor.donors.list', {});
+  const waBadge = d => !d.phone_e164 ? '<span class="badge b-cancelled">No phone</span>' : d.opted_out ? '<span class="badge b-cancelled">WhatsApp: replied STOP</span>' : d.whatsapp_opt_in ? '<span class="badge b-approved">WhatsApp opt-in</span>' : '<span class="badge b-held">No WhatsApp opt-in</span>';
+  function draw() {
+    const rows = all.filter(d => (!f.segment || d.segment === f.segment) && (!f.q || (d.name + ' ' + (d.phone_e164 || '') + ' ' + (d.city || '') + ' ' + (d.email || '') + ' ' + (d.org || '') + ' ' + (d.tags || []).join(' ')).toLowerCase().indexOf(f.q.toLowerCase()) >= 0) &&
+      (!f.optin || (f.optin === 'yes' ? d.whatsapp_opt_in && !d.opted_out : !(d.whatsapp_opt_in && !d.opted_out))) &&
+      (!f.email_optin || (f.email_optin === 'yes' ? !!d.email_opt_in : !d.email_opt_in)) &&
+      (!f.active || dActive(d)));
+    const pages = Math.max(1, Math.ceil(rows.length / f.size)); f.page = Math.min(Math.max(1, f.page), pages);
+    const from = (f.page - 1) * f.size, shown = rows.slice(from, from + f.size);
+    main().innerHTML = '<div class="head"><div><h1>Contacts</h1><p class="sub" style="margin:0">' + all.length + ' contacts. Segments change over time and every change is kept.</p></div>' +
+      '<div class="row" style="flex:0 0 auto"><button class="btn" id="sample" title="Download an empty CSV with the right columns">Sample CSV</button><button class="btn" id="up">Upload CSV</button><input type="file" id="file" accept=".csv,text/csv" style="display:none"><button class="btn primary" id="add">Add contact</button></div></div>' +
+      (upload ? '<div class="card"><b>' + upload.inserted + ' added, ' + upload.updated + ' updated, ' + upload.rejected + ' rejected.</b>' + (upload.errors.length ? '<div class="scroll"><table><thead><tr><th>Row</th><th>Phone</th><th>Reason</th></tr></thead><tbody>' + upload.errors.map(e => '<tr><td>' + e.row + '</td><td>' + esc(e.phone || '') + '</td><td>' + esc(e.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') + '</div>' : '') +
+      '<div class="card"><div class="row">' + fld('Search', '<input id="q" value="' + esc(f.q) + '" placeholder="Name, org, phone, email, city, tag">') +
+      fld('Segment', '<select id="fs"><option value="">All</option>' + Object.keys(state.dmeta.segments).map(c => opt(c, c + ' · ' + state.dmeta.segments[c], c === f.segment)).join('') + '</select>') +
+      fld('Status', '<label class="d-switch"><input type="checkbox" id="fa" role="switch"' + (f.active ? ' checked' : '') + '><span class="d-track" aria-hidden="true"></span><span>Active only</span></label>') +
+      fld('WhatsApp opt-in', '<label class="d-switch"><input type="checkbox" id="fo" role="switch"' + (f.optin === 'yes' ? ' checked' : '') + '><span class="d-track" aria-hidden="true"></span><span>Opted in only</span></label>') +
+      fld('Email opt-in', '<label class="d-switch"><input type="checkbox" id="feo" role="switch"' + (f.email_optin === 'yes' ? ' checked' : '') + '><span class="d-track" aria-hidden="true"></span><span>Opted in only</span></label>') + dCount(rows.length, all.length, 'contact') + '</div></div>' +
+      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Name</th><th>Segment</th><th>Phone</th><th>Email</th><th>City</th><th>Last communicated</th><th>Org</th><th>Reference</th><th><span class="d-sr">Edit</span></th></tr></thead><tbody>' + shown.map(d =>
+        '<tr' + (dActive(d) ? '' : ' style="opacity:.6"') + '><td>' + esc(d.name) + (dActive(d) ? '' : ' <span class="badge b-cancelled">Inactive</span>') + '<div class="small muted">' + esc(d.contact_type || '') + '</div>' + ((d.tags || []).length ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">' + d.tags.map(t => '<span class="d-chip sm">' + esc(t) + '</span>').join('') + '</div>' : '') + '</td><td>' + segTag(d.segment) + '</td><td class="small">' + esc(d.phone_e164 || '') + '<div>' + waBadge(d) + '</div></td><td class="small">' + esc(d.email || '') + (d.email ? '<div>' + (d.email_opt_in ? '<span class="badge b-approved">Email opt-in</span>' : '<span class="badge b-held">No email opt-in</span>') + '</div>' : '') + '</td><td>' + esc(d.city || '') + '</td>' +
+        '<td class="small muted">' + (d.last_message_at ? esc(label((d.last_message_type || '').replace(/_/g, ' ')) + ' · ' + timeAgo(d.last_message_at)) : '') + '</td>' +
+        '<td>' + esc(d.org || '') + '</td><td class="small">' + esc(d.reference || '') + '</td>' +
+        '<td class="d-act"><button class="btn small d-edit" data-edit="' + d.id + '" title="Edit" aria-label="Edit ' + esc(d.name) + '">' + D_ICON_EDIT + '</button></td></tr>').join('') + '</tbody></table>' +
+        // footer: rows per page and page n / total
+        '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '–' + (from + shown.length) + ' of ' + rows.length + '</span>' +
+        '<label class="d-pager-size">Rows per page <select id="psize">' + [10, 20, 50, 100].map(n => opt(n, n, n === f.size)).join('') + '</select></label>' +
+        '<span class="d-pager-nav"><button class="btn small" id="pprev"' + (f.page <= 1 ? ' disabled' : '') + ' aria-label="Previous page">‹ Prev</button><span class="small"><b>' + f.page + '</b> / ' + pages + '</span><button class="btn small" id="pnext"' + (f.page >= pages ? ' disabled' : '') + ' aria-label="Next page">Next ›</button></span></div>'
+        : (all.length ? '<div class="empty">No contacts match these filters.</div>' : emptyState('heart', 'No contacts yet', 'Add a contact or upload a CSV. Each row needs a name and a segment.', { label: 'Upload CSV', attr: 'data-click="#up"' }))) + '</div>';
+    const redraw = () => { f.page = 1; draw(); };
+    $('#q').oninput = e => { f.q = e.target.value; const p = e.target.selectionStart; redraw(); const q = $('#q'); q.focus(); q.setSelectionRange(p, p); };
+    $('#fs').onchange = e => { f.segment = e.target.value; redraw(); };
+    $('#fa').onchange = e => { f.active = e.target.checked ? 'yes' : ''; redraw(); $('#fa').focus(); };
+    $('#fo').onchange = e => { f.optin = e.target.checked ? 'yes' : ''; redraw(); $('#fo').focus(); };
+    $('#feo').onchange = e => { f.email_optin = e.target.checked ? 'yes' : ''; redraw(); $('#feo').focus(); };
+    if ($('#psize')) $('#psize').onchange = e => { f.size = Number(e.target.value); try { localStorage.setItem('ektara-contacts-size', f.size); } catch (err) { /* ignore */ } redraw(); };
+    if ($('#pprev')) $('#pprev').onclick = () => { f.page--; draw(); };
+    if ($('#pnext')) $('#pnext').onclick = () => { f.page++; draw(); };
+    $('#add').onclick = () => donorForm(null, { segment: f.segment });   // a new contact starts in the segment the list is filtered to
+    $('#sample').onclick = () => {
+      const href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + DONOR_CSV);   // the BOM makes Excel read it as UTF-8
+      const m = modal('<h2>Contacts CSV template</h2><p class="small muted" style="margin-top:0">An empty file with the right column names. Add one row per contact, save it as CSV, then use <b>Upload CSV</b>. A contact already saved (same phone, or same email when there is no phone) is updated; anyone else is added. Blank cells leave existing values unchanged.</p>' +
+        '<div class="scroll" style="max-height:320px;overflow-y:auto"><table><thead><tr><th>Column</th><th>What to put</th></tr></thead><tbody>' +
+        DONOR_CSV_COLS.map(c => '<tr><td style="white-space:nowrap"><code>' + esc(c[0]) + '</code>' + (c[2] ? ' <span class="d-req" title="Required">*</span>' : '') + '</td><td class="small">' + esc(c[1] || '') + '</td></tr>').join('') + '</tbody></table></div>' +
+        '<p class="small muted"><span class="d-req">*</span> required. Keep the header row as it is.</p>' +
+        '<div class="actions"><button class="btn" id="x">Close</button><a class="btn primary" style="text-decoration:none;display:inline-block" download="contacts_template.csv" href="' + href + '">Download empty CSV</a></div>', true);
+      $('#x', m).onclick = m.close;
+    };
+    $('#up').onclick = () => $('#file').click();
+    $('#file').onchange = e => { const file = e.target.files[0]; if (!file) return; const r = new FileReader(); r.onload = async () => { try { window.__donorUpload = await call('donor.donors.import', String(r.result)); toast('Upload finished'); go('donor/donors'); } catch (err) { toast(err.message, true); } }; r.readAsText(file, 'utf-8'); };
+    $$('[data-edit]').forEach(b => b.onclick = () => donorModal(b.dataset.edit));
+  }
+  draw();
+};
+
+/** defaults (new contacts only): { segment } pre-selects the segment, e.g. the one the Contacts list is filtered to. */
+function donorFormHtml(d, defaults) {
+  d = d || {}; defaults = defaults || {}; const m = state.dmeta, v = k => esc(d[k] == null ? '' : d[k]);
+  return '<div class="grid2">' + fld('Name <span class="d-req" aria-hidden="true">*</span>', '<input id="f-name" required aria-required="true" value="' + v('name') + '">') + fld('Org', '<input id="f-org" value="' + v('org') + '" placeholder="Company, foundation or trust">') + fld('Phone (WhatsApp, optional)', '<input id="f-phone" value="' + v('phone_e164') + '" placeholder="98765 43210 or +44\u2026">') +
+    fld('WhatsApp opt-in', '<label class="d-switch"><input type="checkbox" id="f-wopt" role="switch"' + (d.whatsapp_opt_in && !d.opted_out ? ' checked' : '') + '><span class="d-track" aria-hidden="true"></span><span>Agreed to receive WhatsApp' + (d.opted_out ? ' <span class="small muted">(replied STOP; switching on records a new opt-in)</span>' : '') + '</span></label>') +
+    fld('Email', '<input id="f-email" value="' + v('email') + '">') +
+    fld('Email opt-in', '<label class="d-switch"><input type="checkbox" id="f-eopt" role="switch"' + (d.email_opt_in ? ' checked' : '') + '><span class="d-track" aria-hidden="true"></span><span>Agreed to receive email</span></label>') +
+    fld('Reference (who referred them)', '<input id="f-refby" value="' + v('reference') + '">') + fld('Type', '<input id="f-type" list="types" value="' + v('contact_type') + '"><datalist id="types"><option>Individual<option>Corporate CSR<option>Foundation<option>Trust</datalist>') +
+    fld('City', '<input id="f-city" value="' + v('city') + '">') + fld('Language', '<input id="f-lang" value="' + (d.language || 'en') + '">') +
+    fld('Segment <span class="d-req" aria-hidden="true">*</span>', '<select id="f-seg" required aria-required="true">' + Object.keys(m.segments).map(c => opt(c, c + ' \u00b7 ' + m.segments[c], c === (d.segment || (defaults.segment && m.segments[defaults.segment] ? defaults.segment : 'P2')))).join('') + '</select>') + fld(d.id ? 'Reason for a segment change' : 'How they came to us', '<input id="f-ref" value="' + (d.id ? '' : v('source_note')) + '">') + dTagEditorHtml(d.tags) +
+    fld('Contact owner', '<input id="f-owner" value="' + v('owner_name') + '">') + fld('Owner email', '<input id="f-oemail" value="' + v('owner_email') + '">') +
+    fld('Last donation date', '<input id="f-last" type="date" value="' + v('last_donation_date') + '">') +
+    fld('Project', '<input id="f-proj" value="' + v('project') + '">') + fld('Core programme', '<input id="f-prog" value="' + v('core_programme') + '">') + '</div>' + fld('Notes', '<textarea id="f-notes" style="min-height:60px">' + v('notes') + '</textarea>') +
+    '<p class="small muted" style="margin:8px 0 0"><span class="d-req">*</span> required</p>';
+}
+function donorFormBody(d) {
+  return { name: val('f-name'), org: val('f-org'), reference: val('f-refby'), email_opt_in: !!($('#f-eopt') && $('#f-eopt').checked), tags: dTagValues(), whatsapp_opt_in: !!($('#f-wopt') && $('#f-wopt').checked), phone: val('f-phone'), email: val('f-email'), contact_type: val('f-type'), city: val('f-city'), language: val('f-lang'), segment: val('f-seg'),
+    segment_reason: d && d.id ? val('f-ref') : '', source_note: d && d.id ? d.source_note : val('f-ref'), owner_name: val('f-owner'), owner_email: val('f-oemail'),
+    last_donation_date: val('f-last'), project: val('f-proj'), core_programme: val('f-prog'), notes: val('f-notes'),
+    status: d && d.status };
+}
+async function donorForm(d, defaults) {
+  await dmeta();
+  const m = modal('<h2>' + (d ? 'Edit contact' : 'Add contact') + '</h2>' + donorFormHtml(d, d ? null : defaults) + '<div id="ferr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
+  bindTagEditor(m);
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { const req = dMissingRequired(m); if (req) { $('#ferr', m).innerHTML = '<div class="alert">' + esc(req) + '</div>'; return; } try { await call('donor.donors.save', d ? d.id : null, donorFormBody(d)); toast('Saved'); m.close(); go('donor/donors'); } catch (e) { $('#ferr', m).innerHTML = errorsHtml(e); } };
+}
+
+async function donorModal(id, open) {   // open: 'donations' to reopen with that section expanded
+  await dmeta();
+  const x = await call('donor.donors.get', id), d = x.donor;
+  const m = modal('<h2>' + esc(d.name) + ' ' + segTag(d.segment) + (dActive(d) ? '' : ' <span class="badge b-cancelled">Inactive</span>') + '</h2><p class="muted">' + (d.org ? esc(d.org) + ' \u00b7 ' : '') + esc(d.phone_e164) + (d.email ? ' \u00b7 ' + esc(d.email) : '') + (d.city ? ' \u00b7 ' + esc(d.city) : '') + '</p>' +
+    '<p>' + (d.opted_out ? '<span class="badge b-cancelled">Opted out</span>' : d.whatsapp_opt_in ? '<span class="badge b-approved">WhatsApp opt-in recorded</span> <span class="small muted">' + esc(d.opt_in_source || '') + '</span>' : '<span class="badge b-held">No WhatsApp opt-in: nothing will be sent</span>') +
+    ' ' + (d.email_opt_in ? '<span class="badge b-approved">Email opt-in</span>' : '<span class="badge b-held">No email opt-in</span>') + (d.email_opt_in_at ? ' <span class="small muted">' + esc(d.email_opt_in_source || '') + ', ' + esc(fmtDate(d.email_opt_in_at)) + '</span>' : '') + '</p>' +
+    '<div class="row" style="flex:0 0 auto;margin-bottom:10px"><button class="btn" id="don">Record donation</button>' +
+    (dActive(d) ? '<button class="btn danger" id="deact">Deactivate</button>' : '<button class="btn" id="react">Activate again</button>') + '</div>' +
+    '<details class="d-msgs"><summary>Segment history <span class="muted small">(' + x.history.length + ')</span></summary><ul class="tl d-msg-list">' + x.history.map(h => '<li>' + (h.from_segment ? segTag(h.from_segment) + ' \u2192 ' : 'Added as ') + segTag(h.to_segment) + ' <span class="muted small">' + esc(fmtDate(h.changed_at)) + ' \u00b7 ' + dTrigIn(h.reason) + '</span></li>').join('') + '</ul></details>' +
+    '<details class="d-msgs"' + (open === 'donations' ? ' open' : '') + '><summary>Donations <span class="muted small">(' + x.donations.length + ')</span></summary>' + (x.donations.length ? '<ul class="tl d-msg-list">' + x.donations.map(n => '<li style="display:flex;gap:8px;align-items:center"><span style="flex:1">' + esc(inrFmt(n.amount)) + ' on ' + esc(n.donated_on) + (n.campaign_name ? ' \u00b7 ' + esc(n.campaign_name) : '') + (n.note ? ' <span class="muted small">' + esc(n.note) + '</span>' : '') + '</span><button class="btn small" data-ed="' + n.id + '">Edit</button><button class="btn small danger" data-dd="' + n.id + '">Delete</button></li>').join('') + '</ul>' : '<p class="muted small">None recorded.</p>') + '</details>' +
+    '<details class="d-msgs"' + (open === 'messages' ? ' open' : '') + '><summary>Messages <span class="muted small">(recent 10 communications' + (x.message_count > x.messages.length ? ' of ' + x.message_count : '') + ')</span></summary>' +
+    '<div style="margin:6px 0 8px"><button class="btn small" id="logc">+ Log a call or conversation</button></div>' +
+    (x.messages.length ? '<ul class="tl d-msg-list">' + x.messages.map(g => g.channel === 'manual' ? dLogLi(g) : '<li>' + dBadge(g.status) + ' ' + esc(String(g.message_type || '').replace(/_/g, ' ')) + ' <span class="muted small">' + esc(dChannel(g)) + ' \u00b7 ' + dTrig(g.trigger) + ' \u00b7 ' + esc(g.updated_at ? timeAgo(g.updated_at) : '') + (g.hold_reason ? ' \u00b7 ' + esc(g.hold_reason) : '') + (g.wa_error ? ' \u00b7 ' + esc(g.wa_error) : '') + '</span>' + (g.reply_text ? '<br><span class="small muted">\u201c' + esc(g.reply_text) + '\u201d</span>' : '') + '</li>').join('') + '</ul>' : '<p class="muted small">None yet.</p>') + '</details>' +
+    '<h2 style="margin-top:12px">Details</h2>' + donorFormHtml(d) + '<div id="ferr"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn primary" id="s">Save details</button></div>', true);
+  bindTagEditor(m);
+  const done = msg => { toast(msg); m.close(); go('donor/donors'); };
+  const act = (sel, fn) => { const b = $(sel, m); if (b) b.onclick = async () => { try { await fn(); } catch (e) { toast(e.message, true); } }; };
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { const req = dMissingRequired(m); if (req) { $('#ferr', m).innerHTML = '<div class="alert">' + esc(req) + '</div>'; return; } try { await call('donor.donors.save', d.id, donorFormBody(d)); done('Saved'); } catch (e) { $('#ferr', m).innerHTML = errorsHtml(e); } };
+  act('#deact', async () => { if (confirm('Deactivate ' + d.name + '? They get no more messages and their waiting messages are cancelled. Their history is kept and you can activate them again.')) { const r = await call('donor.donors.setActive', d.id, false); done('Deactivated' + (r.cancelled ? '; ' + r.cancelled + ' waiting message' + (r.cancelled === 1 ? '' : 's') + ' cancelled' : '')); } });
+  act('#react', async () => { await call('donor.donors.setActive', d.id, true); done('Activated again'); });
+  act('#don', async () => donationForm(d, m));
+  act('#logc', async () => contactLogForm(d, m));
+  $$('[data-dl]', m).forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this logged conversation?')) return;
+    try { await call('donor.donors.deleteLog', b.dataset.dl); toast('Deleted'); m.close(); await go('donor/donors'); donorModal(d.id, 'messages'); } catch (e) { toast(e.message, true); }
+  });
+  $$('[data-ed]', m).forEach(b => b.onclick = () => donationForm(d, m, x.donations.find(n => n.id === b.dataset.ed)));
+  $$('[data-dd]', m).forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this donation? The donor\u2019s last-donation date is recalculated. Their segment is not changed.')) return;
+    try { const r = await call('donor.donations.delete', b.dataset.dd); toast('Donation deleted' + (r.thank_you_cancelled ? ' and its unsent thank-you cancelled' : r.thank_you_already_sent ? '. Its thank-you had already been sent' : '')); m.close(); donorModal(d.id, 'donations'); } catch (e) { toast(e.message, true); }
+  });
+}
+/** One logged conversation in the contact's Messages list. */
+function dLogLi(g) {
+  const v = g.variables || {}, how = (state.dmeta.manual_modes || {})[g.ref] || 'Conversation';
+  return '<li style="display:flex;gap:8px;align-items:flex-start"><span style="flex:1"><span class="badge b-logged">Logged</span> ' + esc(how) +
+    ' <span class="muted small">' + esc(fmtDate(g.created_at)) + (v.by ? ' \u00b7 by ' + esc(v.by) : '') + '</span>' +
+    (v.note ? '<br><span class="small" style="white-space:pre-wrap">' + esc(v.note) + '</span>' : '') + '</span>' +
+    '<button class="btn small danger" data-dl="' + esc(g.id) + '" aria-label="Delete this logged conversation">Delete</button></li>';
+}
+/** Log a call or conversation the team had with a contact. Returns to the contact with Messages open. */
+function contactLogForm(d, parentModal) {
+  const p = n => String(n).padStart(2, '0'), t = new Date(), nowLocal = t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate()) + 'T' + p(t.getHours()) + ':' + p(t.getMinutes());
+  const modes = state.dmeta.manual_modes || { call: 'Phone call' };
+  const m = modal('<h2>Log a conversation with ' + esc(d.name) + '</h2><div class="grid2">' +
+    fld('How <span class="d-req" aria-hidden="true">*</span>', '<select id="l-mode">' + Object.keys(modes).map(k => opt(k, modes[k], k === 'call')).join('') + '</select>') +
+    fld('When <span class="d-req" aria-hidden="true">*</span>', '<input id="l-at" type="datetime-local" max="' + nowLocal + '" value="' + nowLocal + '">') + '</div>' +
+    fld('What was discussed', '<textarea id="l-note" maxlength="2000" style="min-height:90px" placeholder="e.g. Called to thank them for their visit; they asked for the annual report"></textarea>') +
+    '<p class="small muted">Only for your records: nothing is sent to the contact. It shows in their Messages and updates Last communicated.</p><div id="lerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>');
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => {
+    const at = val('l-at');
+    if (!at) { $('#lerr', m).innerHTML = '<div class="alert">Enter when it happened.</div>'; return; }
+    try {
+      await call('donor.donors.logContact', d.id, { mode: val('l-mode'), at: new Date(at).toISOString(), note: val('l-note') });
+      m.close(); parentModal.close(); toast('Conversation logged'); await go('donor/donors'); donorModal(d.id, 'messages');
+    } catch (e) { $('#lerr', m).innerHTML = errorsHtml(e); }
+  };
+}
+/** The required fields of the contact form. Returns an error message, or '' when all is filled in. */
+function dMissingRequired(root) {
+  const missing = [['f-name', 'Name'], ['f-seg', 'Segment']].filter(x => { const e = $('#' + x[0], root); return e && !String(e.value || '').trim(); });
+  if (missing.length) { const e = $('#' + missing[0][0], root); if (e) e.focus(); }
+  return missing.length ? missing.map(x => x[1]).join(' and ') + (missing.length > 1 ? ' are' : ' is') + ' required.' : '';
+}
+const inrFmt = n => '\u20b9' + Number(n).toLocaleString('en-IN');
+
+async function donationForm(d, parentModal, ex) {
+  const camps = await call('donor.campaigns.list');
+  const m = modal('<h2>' + (ex ? 'Edit donation from ' : 'Record donation from ') + esc(d.name) + '</h2><div class="grid2">' + fld('Amount (\u20b9)', '<input id="a-amt" inputmode="decimal" value="' + esc(ex ? ex.amount : '') + '">') + fld('Date', '<input id="a-date" type="date" value="' + esc(ex ? ex.donated_on : new Date().toISOString().slice(0, 10)) + '">') + '</div>' +
+    fld('Campaign (leave empty for a general or programme gift)', '<select id="a-camp"><option value="">None</option>' + camps.map(c => opt(c.id, c.name, ex && ex.campaign_id === c.id)).join('') + '</select>') + fld('Note', '<input id="a-note" value="' + esc(ex && ex.note ? ex.note : '') + '">') +
+    '<p class="small muted">' + (ex ? 'Changing a donation does not change the contact\u2019s segment.' : 'No message is sent and the contact\u2019s segment does not change. Send updates with a broadcast.') + '</p>' + '<div id="aerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">' + (ex ? 'Save changes' : 'Record') + '</button></div>');
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => {
+    const body = { amount: val('a-amt'), donated_on: val('a-date'), campaign_id: val('a-camp') || null, note: val('a-note') };
+    try {
+      if (ex) { await call('donor.donations.update', ex.id, body); m.close(); parentModal.close(); toast('Donation updated'); donorModal(d.id, 'donations'); return; }
+      const r = await call('donor.donations.record', d.id, body); m.close(); parentModal.close(); toast('Donation recorded'); await go('donor/donors'); donorModal(d.id, 'donations');
+    } catch (e) { $('#aerr', m).innerHTML = errorsHtml(e); }
+  };
+}
+
+// ---------- donor campaigns ----------
+views['donor/campaigns'] = async function () {
+  const [all, bcs] = await Promise.all([call('donor.campaigns.list'), call('donor.broadcasts.list')]);
+  const f = { q: '' };
+  const cStatus = c => label(String(c.status || 'planned').replace('_', ' '));   // a blank status counts as planned
+  const matches = c => { const q = f.q.trim().toLowerCase(); return !q || [c.name, cStatus(c), c.status].some(v => String(v || '').toLowerCase().indexOf(q) >= 0); };
+  const byCamp = {}; bcs.forEach(b => { if (b.campaign_id) (byCamp[b.campaign_id] = byCamp[b.campaign_id] || []).push(b); });
+  const bcCell = c => { const l = byCamp[c.id] || [], dr = l.filter(b => b.status === 'draft').length;
+    return l.length ? '<button class="btn small" data-b="' + c.id + '">' + l.length + ' broadcast' + (l.length === 1 ? '' : 's') + '</button>' + (dr ? '<div class="small" style="color:var(--warn)">' + dr + ' to approve</div>' : '') : '<span class="muted small">None</span>'; };
+  function draw() {
+  const list = all.filter(matches);
+  main().innerHTML = '<div class="head"><div><h1>Campaigns</h1><p class="sub" style="margin:0">Link donations and broadcasts to a campaign.</p></div><button class="btn primary" id="new">New campaign</button></div>' +
+    (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="cq" type="search" value="' + esc(f.q) + '" placeholder="Campaign name or status (planned, running, closed, results ready)">') + dCount(list.length, all.length, 'campaign') + '</div></div>' : '') +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Campaign</th><th>Status</th><th>Starts</th><th>Ends</th><th>Donors</th><th>Raised</th><th>Broadcasts</th><th></th></tr></thead><tbody>' + list.map(c =>
+      '<tr><td><b>' + esc(c.name) + '</b></td><td>' + badge(c.status === 'results_ready' ? 'approved' : c.status === 'running' ? 'sent' : c.status === 'closed' ? 'declined' : 'queued').replace(/>[^<]*<\/span>$/, '>' + esc(cStatus(c)) + '</span>') + '</td><td>' + esc(c.start_date || '') + '</td><td>' + esc(c.end_date || '') + '</td><td>' + c.donor_count + '</td><td>' + esc(inrFmt(c.total_raised)) + '</td><td>' + bcCell(c) + '</td>' +
+      '<td style="white-space:nowrap"><button class="btn small" data-e="' + c.id + '">Edit</button> ' + (c.status !== 'results_ready' ? '<button class="btn small" data-r="' + c.id + '">Results are ready</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : all.length ? '<div class="card empty">No campaigns match \u201c' + esc(f.q) + '\u201d.</div>' : '<div class="card">' + emptyState('send', 'No campaigns yet', 'A campaign groups the donations and broadcasts of one appeal.', { label: 'New campaign', attr: 'data-click="#new"' }) + '</div>');
+  const q = $('#cq'); if (q) q.oninput = e => { f.q = e.target.value; const pos = e.target.selectionStart; draw(); const n = $('#cq'); n.focus(); n.setSelectionRange(pos, pos); };
+  $('#new').onclick = () => campaignForm(null);
+  $$('[data-b]').forEach(b => b.onclick = () => campaignBroadcasts(all.find(c => c.id === b.dataset.b), byCamp[b.dataset.b] || []));
+  $$('[data-e]').forEach(b => b.onclick = () => campaignForm(all.find(c => c.id === b.dataset.e)));
+  $$('[data-r]').forEach(b => b.onclick = async () => { if (!confirm('Mark results ready? The results text then fills the campaign_result placeholder. Nothing is sent.')) return; try { await call('donor.campaigns.resultsReady', b.dataset.r); toast('Marked results ready'); views['donor/campaigns'](); } catch (e) { toast(e.message, true); } });
+  }
+  draw();
+};
+/** Broadcast preview: total selected, "P1 4/20" per segment (selected / all donors in it), and every recipient in a collapsible, scrolling list. */
+function dRecipientsHtml(p) {
+  const by = {}; p.recipients.forEach(r => { (by[r.segment] = by[r.segment] || []).push(r); });
+  const order = Object.keys(state.dmeta.segments).filter(s => by[s]).concat(Object.keys(by).filter(s => !state.dmeta.segments[s]));
+  const yes = '<span class="badge b-approved">Yes</span>', no = '<span class="muted">—</span>';
+  return '<label>Recipients: <b>' + p.recipients.length + ' selected</b></label>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:4px 0">' + (order.length ? order.map(s => '<span class="d-chip" style="padding:3px 10px" title="' + esc(state.dmeta.segments[s] || s) + ': ' + by[s].length + ' of ' + (p.segment_totals[s] || by[s].length) + ' donors get it">' + esc(s) + ' <b>' + by[s].length + '</b><span class="d-n">/' + (p.segment_totals[s] || by[s].length) + '</span></span>').join('') : '<span class="muted small">Nobody yet.</span>') + '</div>' +
+    (p.recipients.length ? '<details class="d-msgs"><summary>Details <span class="muted small">(' + p.recipients.length + ' donors)</span></summary><div class="d-msg-list" style="max-height:320px;margin-top:6px"><table><thead><tr><th>Donor</th><th>Segment</th><th>WhatsApp</th><th>Email</th></tr></thead><tbody>' +
+      order.map(s => by[s].map(r => '<tr><td>' + esc(r.name) + '</td><td>' + segTag(r.segment) + '</td><td class="small">' + (r.opt_in ? yes + ' <span class="muted">' + esc(r.phone || '') + '</span>' : no) + '</td><td class="small">' + (r.email ? yes + ' <span class="muted">' + esc(r.email_address || '') + '</span>' : no) + '</td></tr>').join('')).join('') +
+      '</tbody></table></div></details>' : '');
+}
+/** Every broadcast linked to one campaign (drafts and cancelled ones included). */
+function campaignBroadcasts(c, l) {
+  const m = modal('<h2>' + esc(c.name) + ': broadcasts</h2><p class="small muted">Every broadcast linked to this campaign, newest first, including drafts and cancelled ones.</p>' +
+    '<div class="scroll"><table><thead><tr><th>Name</th><th>Trigger</th><th>Send on</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>' + l.map(b =>
+      '<tr><td><b>' + esc(b.name) + '</b><div class="small muted">' + esc(b.template_name || 'no template yet') + (b.approved_by ? ' \u00b7 approved by ' + esc(b.approved_by) + ', ' + esc(fmtDate(b.approved_at)) : '') + '</div></td><td>' + dTrig(b.trigger) + '</td><td>' + esc(b.send_on || '') + '</td><td>' + dBcStatus(b) + '</td><td class="small">' + dBcProgress(b) + '</td>' +
+      '<td>' + (b.status === 'draft' ? '<button class="btn small primary" data-rv="' + b.id + '">Review</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' +
+    '<div class="actions"><button class="btn" id="x">Close</button><button class="btn primary" id="ob">Open in Broadcasts</button></div>', true);
+  $('#x', m).onclick = m.close;
+  $('#ob', m).onclick = () => { window.__bq = c.name; m.close(); go('donor/broadcasts'); };
+  $$('[data-rv]', m).forEach(x => x.onclick = async () => { m.close(); window.__bq = c.name; await go('donor/broadcasts'); broadcastForm(l.find(b => b.id === x.dataset.rv)); });
+}
+function campaignForm(c) {
+  c = c || {}; const v = k => esc(c[k] == null ? '' : c[k]);
+  const m = modal('<h2>' + (c.id ? 'Edit campaign' : 'New campaign') + '</h2>' + fld('Name', '<input id="c-name" value="' + v('name') + '">') +
+    '<div class="grid2">' + fld('Starts', '<input id="c-start" type="date" value="' + v('start_date') + '">') + fld('Ends', '<input id="c-end" type="date" value="' + v('end_date') + '">') +
+    fld('Status', '<select id="c-status">' + ['planned', 'running', 'closed'].map(s => opt(s, s, s === (c.status === 'results_ready' ? 'closed' : (c.status || 'planned')))).join('') + '</select>') + '</div>' +
+    fld('Progress text (fills the campaign_progress placeholder)', '<textarea id="c-prog" style="min-height:60px">' + v('progress_text') + '</textarea>') +
+    fld('Results text (fills the campaign_result placeholder)', '<textarea id="c-res" style="min-height:60px">' + v('results_text') + '</textarea>') + '<div id="cerr"></div>' +
+    '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>');
+  $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.campaigns.save', c.id || null, { name: val('c-name'), start_date: val('c-start'), end_date: val('c-end'), status: c.status === 'results_ready' ? 'results_ready' : val('c-status'), progress_text: val('c-prog'), results_text: val('c-res') }); toast('Saved'); m.close(); views['donor/campaigns'](); } catch (e) { $('#cerr', m).innerHTML = errorsHtml(e); } };
+}
+
+// ---------- donor templates ----------
+views['donor/templates'] = async function () {
+  await dmeta();
+  const list = await call('donor.templates.list');
+  const SIZES = [5, 10, 15, 50];
+  let size = 5; try { size = Number(localStorage.getItem('ektara-templates-size')) || 5; } catch (e) { /* storage can be blocked */ }
+  const f = { page: 1, size: SIZES.indexOf(size) >= 0 ? size : 5 };
+  function draw() {
+  const pages = Math.max(1, Math.ceil(list.length / f.size)); f.page = Math.min(Math.max(1, f.page), pages);
+  const from = (f.page - 1) * f.size, shown = list.slice(from, from + f.size);
+  main().innerHTML = '<div class="head"><div><h1>Templates</h1><p class="sub" style="margin:0">Each message type is a WhatsApp template Meta approves once. Placeholder labels such as donor_name or campaign_result fill themselves in.</p></div>' +
+    '<div class="row" style="flex:0 0 auto"><button class="btn" id="imp">Import from Twilio</button><button class="btn" id="sync">Check status now</button><button class="btn primary" id="new">Request template</button></div></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Type</th><th>Lang</th><th>Status</th><th>Message</th><th></th></tr></thead><tbody>' + shown.map(t =>
+      '<tr><td><b>' + esc(t.name) + '</b>' + dMediaChip(t) + '</td><td class="small">' + esc(state.dmeta.message_types[t.message_type] || '(not set)') + (t.source_code ? ' \u00b7 ' + esc(t.source_code) : '') + '</td><td>' + esc(t.language) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
+      '<td class="small" style="max-width:340px">' + esc(t.body) + '<div class="muted">Labels: ' + esc((t.variable_names || []).join(', ')) + '</div></td><td style="white-space:nowrap"><button class="btn small" data-e="' + t.id + '">Type &amp; labels</button>' + (t.status === 'draft' ? ' <button class="btn small" data-retry="' + t.id + '">Retry submit</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
+      // footer: rows per page and page n / total (same as the Contacts page)
+      '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '\u2013' + (from + shown.length) + ' of ' + list.length + '</span>' +
+      '<label class="d-pager-size">Rows per page <select id="psize">' + SIZES.map(n => opt(n, n, n === f.size)).join('') + '</select></label>' +
+      '<span class="d-pager-nav"><button class="btn small" id="pprev"' + (f.page <= 1 ? ' disabled' : '') + ' aria-label="Previous page">\u2039 Prev</button><span class="small"><b>' + f.page + '</b> / ' + pages + '</span><button class="btn small" id="pnext"' + (f.page >= pages ? ' disabled' : '') + ' aria-label="Next page">Next \u203a</button></span></div></div>' : '<div class="card">' + emptyState('file', 'No donor templates yet', 'Each message type needs one approved WhatsApp template. Request one or import from Twilio.', { label: 'Request template', attr: 'data-click="#new"' }) + '</div>');
+  $('#new').onclick = () => donorTemplateForm();
+  $('#sync').onclick = async () => { try { const r = await call('donor.templates.sync'); toast(syncSummary(r)); views['donor/templates'](); } catch (e) { toast(e.message, true); } };
+  $('#imp').onclick = async e => { e.target.disabled = true; try { const r = await call('donor.templates.import'); toast(r.imported + ' imported of ' + r.found + '. Set each one\u2019s type and labels.'); views['donor/templates'](); } catch (err) { toast(err.message, true); e.target.disabled = false; } };
+  $$('[data-retry]').forEach(b => b.onclick = async () => { try { await call('donor.templates.retrySubmit', b.dataset.retry); toast('Submitted'); views['donor/templates'](); } catch (e) { toast(e.message, true); } });
+  $$('[data-e]').forEach(b => b.onclick = () => donorTemplateMeta(list.find(t => t.id === b.dataset.e)));
+  if ($('#psize')) $('#psize').onchange = e => { f.size = Number(e.target.value); f.page = 1; try { localStorage.setItem('ektara-templates-size', f.size); } catch (err) { /* ignore */ } draw(); };
+  if ($('#pprev')) $('#pprev').onclick = () => { f.page--; draw(); };
+  if ($('#pnext')) $('#pnext').onclick = () => { f.page++; draw(); };
+  }
+  draw();
+};
+function labelInputs(ph, names, samples, withSamples) {
+  const auto = state.dmeta.auto_labels;
+  return '<datalist id="labels">' + auto.map(a => '<option>' + a + '</option>').join('') + '</datalist>' + ph.map(n => '<div class="row" style="margin-bottom:6px"><input data-n="' + n + '" list="labels" value="' + esc(names[n - 1] || '') + '" placeholder="Label for {{' + n + '}}: pick one that fills itself, or type your own">' + (withSamples ? '<input data-s="' + n + '" value="' + esc((samples || {})[n] || '') + '" placeholder="Sample value for {{' + n + '}}">' : '') + '</div>').join('');
+}
+/** "Image" / "PDF" next to a media template's name. */
+const dMediaChip = t => t && t.media_type ? ' <span class="d-chip sm" title="Sends ' + (t.media_type === 'document' ? 'a PDF' : 'an image') + ' with the message">' + (t.media_type === 'document' ? '\ud83d\udcc4 PDF' : '\ud83d\uddbc Image') + '</span>' : '';
+function donorTemplateForm() {
+  const s = { body: 'Dear {{1}}, here is an update from Ek Tara: {{2}} Thank you for standing with us.', names: ['donor_name', 'message'], samples: { 1: 'Asha', 2: 'Our new classroom is ready.' } };
+  const m = modal('<h2>Request donor template</h2><div class="grid2">' + fld('Name (lowercase, digits, underscores; donor_ is added)', '<input id="t-name" placeholder="donor_thank_you_en">') + fld('Language', languageSelect('t-lang', 'en')) +
+    fld('Message type', '<select id="t-type">' + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === 'special_update')).join('') + '</select>') + fld('Welcome only: written for source', '<select id="t-src">' + opt('', 'Any source', true) + opt('P1', 'P1 trustee lead', false) + opt('P2', 'P2 website lead', false) + opt('P3', 'P3 referral lead', false) + '</select>') + '</div>' +
+    '<div class="grid2">' + fld('Category', '<select id="t-cat">' + opt('UTILITY', 'Utility', false) + opt('MARKETING', 'Marketing (updates, greetings, appeals)', true) + '</select>') +
+    fld('Attachment', '<select id="t-media">' + opt('', 'None (text only)', true) + opt('image', 'Image (PNG or JPG, up to 5 MB)', false) + opt('document', 'PDF document (up to 16 MB)', false) + '</select>') + '</div>' +
+    '<div id="t-mbox" hidden>' + fld('Sample file (Google Drive share link) <span class="d-req" aria-hidden="true">*</span>', '<input id="t-msample" placeholder="https://drive.google.com/file/d/\u2026/view?usp=sharing">') +
+    '<p class="small muted" style="margin:4px 0 0">WhatsApp reviews this file. In Drive, share it as <b>Anyone with the link</b> (Viewer). Each broadcast can then attach a different file of the same kind. Excel files cannot be WhatsApp attachments.</p></div>' +
+    fld('Message body', '<textarea id="t-body">' + esc(s.body) + '</textarea>') +
+    '<p class="small muted">Use {{1}}, {{2}} \u2026 Don\u2019t start or end with a placeholder. A placeholder value is one paragraph (no line breaks).</p><div id="vars"></div><div id="terr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Submit to WhatsApp</button></div>', true);
+  $('#t-media', m).onchange = e => { $('#t-mbox', m).hidden = !e.target.value; };
+  const vars = () => { const ph = placeholders(s.body); $('#vars', m).innerHTML = ph.length ? '<label>Placeholders</label>' + labelInputs(ph, s.names, s.samples, true) : ''; $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $$('[data-s]', m).forEach(i => i.oninput = () => { s.samples[i.dataset.s] = i.value; }); };
+  vars(); $('#t-body', m).oninput = e => { s.body = e.target.value; vars(); }; $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async e => {
+    const ph = placeholders(s.body), media = val('t-media');
+    if (media && !val('t-msample').trim()) { $('#terr', m).innerHTML = '<div class="alert">Paste the Google Drive share link of the sample ' + (media === 'document' ? 'PDF' : 'image') + '.</div>'; $('#t-msample', m).focus(); return; }
+    e.target.disabled = true;
+    try { await call('donor.templates.create', { name: (n => /^donor_/.test(n) ? n : 'donor_' + n)(val('t-name').trim()), language: val('t-lang').trim(), message_type: val('t-type'), source_code: val('t-type') === 'welcome' ? val('t-src') : '', category: val('t-cat'), body: s.body, variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}), media_type: media, media_sample: val('t-msample').trim() }); toast('Submitted. Status: pending Meta'); m.close(); views['donor/templates'](); }
+    catch (err) { $('#terr', m).innerHTML = errorsListHtml(err); e.target.disabled = false; }
+  };
+}
+function donorTemplateMeta(t) {
+  const s = { names: (t.variable_names || []).slice() }, ph = placeholders(t.body);
+  const m = modal('<h2>' + esc(t.name) + '</h2><p class="small muted">This only changes how the app uses the template. Nothing is sent to Twilio or WhatsApp.</p><div class="grid2">' +
+    fld('Message type', '<select id="m-type">' + opt('', 'Choose\u2026', !t.message_type) + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === t.message_type)).join('') + '</select>') +
+    fld('Welcome only: written for source', '<select id="m-src">' + opt('', 'Any source', !t.source_code) + opt('P1', 'P1 trustee lead', t.source_code === 'P1') + opt('P2', 'P2 website lead', t.source_code === 'P2') + opt('P3', 'P3 referral lead', t.source_code === 'P3') + '</select>') +
+    (t.media_type ? fld('Attachment', '<select id="m-media">' + opt('image', 'Image (PNG or JPG)', t.media_type === 'image') + opt('document', 'PDF document', t.media_type === 'document') + '</select>') : '') + '</div>' +
+    '<div class="card" style="margin:10px 0">' + esc(t.body) + '</div><label>Placeholder labels</label><div id="vars">' + labelInputs(ph, s.names, null, false) + '</div>' +
+    (t.media_type ? '<p class="small muted" style="margin:4px 0 0">{{' + (ph.length + 1) + '}} is the attachment: each broadcast fills it with a Google Drive share link.</p>' : '') + '<div id="merr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
+  $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $('#x', m).onclick = m.close;
+  $('#s', m).onclick = async () => { try { await call('donor.templates.update', t.id, { message_type: val('m-type'), source_code: val('m-src'), variable_names: ph.map(n => s.names[n - 1] || ''), media_type: $('#m-media', m) ? val('m-media') : undefined }); toast('Saved'); m.close(); views['donor/templates'](); } catch (e) { $('#merr', m).innerHTML = errorsHtml(e); } };
+}
+
+// ---------- broadcasts (T8 general, T11 special, T12 festive) ----------
+const dCount = (shown, total, word) => '<span class="small muted" id="cnt" aria-live="polite" style="flex:0 0 auto;padding-bottom:10px;white-space:nowrap">' + (shown === total ? total : shown + ' of ' + total) + ' ' + word + (total === 1 ? '' : 's') + '</span>';
+const dBcStatus = b => badge(b.status === 'draft' ? 'held' : b.status === 'approved' ? 'approved' : 'cancelled').replace(/>[^<]*<\/span>$/, '>' + (b.status === 'draft' ? 'Needs approval' : label(b.status)) + '</span>');
+const dBcProgress = b => b.status === 'draft' ? '\u2014' : b.counts.sent + ' sent, ' + b.counts.waiting + ' waiting' + (b.counts.failed ? ', ' + b.counts.failed + ' failed' : '');
+views['donor/broadcasts'] = async function () {
+  await dmeta();
+  const all = await call('donor.broadcasts.list');
+  let size = 20; try { size = Number(localStorage.getItem('ektara-broadcasts-size')) || 20; } catch (e) { /* storage can be blocked */ }
+  const f = { q: window.__bq || '', page: 1, size: [10, 20, 50, 100].indexOf(size) >= 0 ? size : 20 }; window.__bq = '';   // a search handed over by the campaign pop-up, used once
+  const statusText = b => b.status === 'draft' ? 'needs approval draft' : b.status;
+  const matches = b => { const q = f.q.trim().toLowerCase(); return !q || [b.name, b.campaign_name, statusText(b)].some(v => String(v || '').toLowerCase().indexOf(q) >= 0); };
+  function draw() {
+    const list = all.filter(matches);
+    const pages = Math.max(1, Math.ceil(list.length / f.size)); f.page = Math.min(Math.max(1, f.page), pages);
+    const from = (f.page - 1) * f.size, shown = list.slice(from, from + f.size);
+    main().innerHTML = '<div class="head"><div><h1>Broadcasts</h1><p class="sub" style="margin:0">Write a broadcast, check the text and the list, then approve it. Nothing goes out until you approve.</p></div><button class="btn primary" id="new">New broadcast</button></div>' +
+      (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="bq" type="search" value="' + esc(f.q) + '" placeholder="Broadcast name, campaign or status (e.g. needs approval, approved, cancelled)">') + dCount(list.length, all.length, 'broadcast') + '</div></div>' : '') +
+      (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Campaign</th><th>Trigger</th><th>Send on</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>' + shown.map(b =>
+        '<tr><td><b>' + esc(b.name) + '</b><div class="small muted">' + esc(b.template_name || 'no template yet') + '</div></td><td class="small">' + esc(b.campaign_name || '') + '</td><td>' + dTrig(b.trigger) + '</td><td>' + esc(b.send_on || '') + '</td><td>' + dBcStatus(b) + '</td>' +
+        '<td class="small">' + dBcProgress(b) + '</td>' +
+        '<td style="white-space:nowrap">' + (b.status === 'draft' ? '<button class="btn small primary" data-r="' + b.id + '">Review &amp; approve</button> <button class="btn small danger" data-del="' + b.id + '">Delete</button>' : b.status === 'approved' ? '<button class="btn small danger" data-c="' + b.id + '">Cancel unsent</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
+        // footer: rows per page and page n / total (same as the Contacts page)
+        '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '\u2013' + (from + shown.length) + ' of ' + list.length + '</span>' +
+        '<label class="d-pager-size">Rows per page <select id="psize">' + [10, 20, 50, 100].map(n => opt(n, n, n === f.size)).join('') + '</select></label>' +
+        '<span class="d-pager-nav"><button class="btn small" id="pprev"' + (f.page <= 1 ? ' disabled' : '') + ' aria-label="Previous page">\u2039 Prev</button><span class="small"><b>' + f.page + '</b> / ' + pages + '</span><button class="btn small" id="pnext"' + (f.page >= pages ? ' disabled' : '') + ' aria-label="Next page">Next \u203a</button></span></div></div>'
+        : all.length ? '<div class="card empty">No broadcasts match “' + esc(f.q) + '”.</div>' : '<div class="card">' + emptyState('radio', 'No broadcasts yet', 'Write a general, special or festive update, check it, then approve it.', { label: 'New broadcast', attr: 'data-click="#new"' }) + '</div>');
+    const q = $('#bq'); if (q) q.oninput = e => { f.q = e.target.value; f.page = 1; const pos = e.target.selectionStart; draw(); const n = $('#bq'); n.focus(); n.setSelectionRange(pos, pos); };
+    if ($('#psize')) $('#psize').onchange = e => { f.size = Number(e.target.value); f.page = 1; try { localStorage.setItem('ektara-broadcasts-size', f.size); } catch (err) { /* ignore */ } draw(); };
+    if ($('#pprev')) $('#pprev').onclick = () => { f.page--; draw(); };
+    if ($('#pnext')) $('#pnext').onclick = () => { f.page++; draw(); };
+    $('#new').onclick = () => broadcastForm({ kind: 'special_update', segments: [], values: {} });
+    $$('[data-r]').forEach(x => x.onclick = () => broadcastForm(all.find(y => y.id === x.dataset.r)));
+    $$('[data-del]').forEach(x => x.onclick = async () => { if (confirm('Delete this draft?')) { try { await call('donor.broadcasts.delete', x.dataset.del); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
+    $$('[data-c]').forEach(x => x.onclick = async () => { if (confirm('Cancel the messages that have not been sent yet?')) { try { const r = await call('donor.broadcasts.cancel', x.dataset.c); toast(r.cancelled + ' cancelled'); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
+  }
+  draw();
+};
+
+async function broadcastForm(b) {
+  const [tpls, camps, tagData] = await Promise.all([call('donor.templates.list'), call('donor.campaigns.list'), call('donor.tags')]);
+  const s = { excluded_tags: (b.excluded_tags || []).slice(), id: b.id || null, name: b.name || '', kind: b.kind, template_id: b.template_id || '', campaign_id: b.campaign_id || '', segments: (b.segments || []).slice(), send_on: b.send_on || '', event_date: b.event_date || '', values: Object.assign({}, b.values || {}) };
+  const m = modal('<div id="bf"></div>', true);
+  function draw() {
+    const okT = tpls.filter(t => t.status === 'approved' && t.message_type === s.kind), t = tpls.find(x => x.id === s.template_id);
+    // One input per placeholder of the template, like the parent campaign page: {{1}}, {{2}} ... with their labels (plus the attachment of a media template).
+    // A label the app fills itself (amount, donor_name ...) comes from each contact's record; what is typed here is used for contacts whose record has no value.
+    const keyOf = l => String(l).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const slots = t ? placeholders(t.body).map(n => { const l = (t.variable_names || [])[n - 1] || 'value ' + n; return { n, label: l, key: keyOf(l), auto: state.dmeta.auto_labels.indexOf(keyOf(l)) >= 0 }; })
+      .concat(t.media_type ? [{ n: placeholders(t.body).length + 1, label: 'media_file', key: 'media_file', auto: false }] : []) : [];
+    const slotField = x => x.key === 'media_file'
+      ? fld('{{' + x.n + '}} Attachment: Google Drive share link (' + (t.media_type === 'document' ? 'PDF' : 'PNG or JPG') + ', Anyone with the link) <span class="d-req" aria-hidden="true">*</span>', '<input data-v="media_file" value="' + esc(s.values.media_file || '') + '" placeholder="https://drive.google.com/file/d/…/view?usp=sharing">')
+      : fld('{{' + x.n + '}} ' + esc(x.label) + (x.auto ? ' <span class="small muted">(from each contact’s record)</span>' : ''),
+        '<input data-v="' + esc(x.key) + '" value="' + esc(s.values[x.key] || '') + '" placeholder="' + esc(x.auto ? 'Used only when a contact has no value' : ((t.sample_values || {})[x.n] || '')) + '">');
+    $('#bf', m).innerHTML = '<h2>' + (s.id ? 'Review broadcast' : 'New broadcast') + '</h2><div class="grid2">' + fld('Name', '<input id="b-name" value="' + esc(s.name) + '">') +
+      fld('Kind', '<select id="b-kind">' + Object.keys(state.dmeta.kinds).map(k => opt(k, state.dmeta.kinds[k], k === s.kind)).join('') + '</select>') +
+      fld('Template (approved, same type)', '<select id="b-tpl">' + opt('', okT.length ? 'Choose\u2026' : 'No approved template of this type', !s.template_id) + okT.map(x => opt(x.id, x.name + ' (' + x.language + ')', x.id === s.template_id)).join('') + '</select>') +
+      fld('Send on (empty = as soon as approved)', '<input id="b-on" type="date" value="' + esc(s.send_on) + '">') + (s.kind === 'festive_greeting' ? fld('Festival date (greeting is dropped 2 days after)', '<input id="b-ev" type="date" value="' + esc(s.event_date) + '">') : '') +
+      fld('Campaign (optional: links it to a campaign; does not add its donors)', '<select id="b-camp">' + opt('', 'None', !s.campaign_id) + camps.map(c => opt(c.id, c.name, c.id === s.campaign_id)).join('') + '</select>') + '</div>' +
+      '<label>Also send to these segments</label><div class="checks">' + Object.keys(state.dmeta.segments).map(c => '<label><input type="checkbox" data-sg="' + c + '" ' + (s.segments.indexOf(c) >= 0 ? 'checked' : '') + '> ' + c + ' ' + esc(state.dmeta.segments[c]) + '</label>').join('') + '</div>' + tagBox() +
+      (slots.length ? '<label>Values for this send</label><div class="grid2">' + slots.map(slotField).join('') + '</div>' +
+        (slots.some(x => x.auto) ? '<p class="small muted" style="margin:4px 0 0">Values marked \u201cfrom each contact\u2019s record\u201d fill themselves for each person. Type one only to use for contacts whose record is empty.</p>' : '') : '') +
+      '<div id="berr"></div><div id="prev"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn" id="sv">Save &amp; preview</button></div>';
+    $('#x', m).onclick = m.close;
+    $('#b-kind', m).onchange = e => { grab(); s.kind = e.target.value; s.template_id = ''; draw(); };
+    $('#b-tpl', m).onchange = () => { grab(); draw(); };
+    $$('[data-sg]', m).forEach(c => c.onchange = () => { grab(); draw(); });
+    $$('[data-tg]', m).forEach(c => c.onclick = () => {
+      grab(); const k = c.dataset.tg.toLowerCase(), had = s.excluded_tags.some(t => t.toLowerCase() === k);
+      s.excluded_tags = had ? s.excluded_tags.filter(t => t.toLowerCase() !== k) : s.excluded_tags.concat([c.dataset.tg]); draw();
+    });
+    $('#sv', m).onclick = saveAndPreview;
+  }
+  /** Every tag used by donors in the chosen segments, as chips. A removed chip stays, faded, so it can be added back. */
+  function tagBox() {
+    if (!s.segments.length) return '';
+    const agg = {}; let untagged = 0;
+    s.segments.forEach(sg => { const x = tagData.segments[sg]; if (!x) return; untagged += x.untagged; Object.keys(x.tags).forEach(t => { const k = t.toLowerCase(); (agg[k] = agg[k] || { name: t, n: 0 }).n += x.tags[t]; }); });
+    const items = Object.keys(agg).map(k => agg[k]).sort((a, b) => natural(a.name, b.name));
+    if (untagged && items.length) items.push({ name: tagData.no_tag, label: 'No tag', n: untagged });
+    const head = '<label>Tags in the chosen segments</label>';
+    if (!items.length) return head + '<div class="d-tagbox"><span class="small muted">No donor in these segments has a tag, so everyone in them gets it.</span></div>';
+    const off = {}; s.excluded_tags.forEach(t => { off[t.toLowerCase()] = 1; });
+    return head + '<div class="d-tagbox">' + items.map(it => { const out = !!off[it.name.toLowerCase()], nm = it.label || it.name;
+      return '<span class="d-chip' + (out ? ' off' : '') + '">' + esc(nm) + ' <span class="d-n">' + it.n + '</span><button type="button" data-tg="' + esc(it.name) + '" title="' + (out ? 'Add back' : 'Leave out') + '" aria-label="' + (out ? 'Add back ' : 'Leave out ') + esc(nm) + '">' + (out ? '+' : '\u00d7') + '</button></span>'; }).join('') + '</div>' +
+      '<p class="small muted" style="margin:4px 0 0">Donors in these segments get it only if they have at least one of the tags still in the box. Click \u00d7 to leave a tag out, + to add it back. The number is how many donors have the tag.</p>';
+  }
+  function grab() {
+    s.name = val('b-name'); s.template_id = val('b-tpl'); s.send_on = val('b-on'); s.event_date = $('#b-ev') ? val('b-ev') : s.event_date; s.campaign_id = $('#b-camp') ? val('b-camp') : s.campaign_id;
+    s.segments = $$('[data-sg]', m).filter(c => c.checked).map(c => c.dataset.sg); $$('[data-v]', m).forEach(i => { s.values[i.dataset.v] = i.value; });
+  }
+  async function saveAndPreview() {
+    grab(); $('#berr', m).innerHTML = '';
+    // a visible "working" state: the preview can take a few seconds with many donors
+    const sv = $('#sv', m); if (sv) { sv.disabled = true; sv.classList.add('is-busy'); }
+    $('#prev', m).innerHTML = '<div class="card" style="margin-top:12px" role="status" aria-live="polite"><div style="display:flex;align-items:center;gap:12px">' + stringSvg('sm') +
+      '<div><b>Saving and preparing the preview…</b><div class="small muted">Working out who gets it, filling the template for each donor. This can take a few seconds.</div></div></div></div>';
+    const done = () => { const b = $('#sv', m); if (b) { b.disabled = false; b.classList.remove('is-busy'); } };
+    try {
+      const saved = await call('donor.broadcasts.save', s.id, { name: s.name, kind: s.kind, template_id: s.template_id, campaign_id: s.campaign_id, segments: s.segments, send_on: s.send_on, event_date: s.event_date, values: s.values, excluded_tags: s.excluded_tags });
+      s.id = saved.id;
+      const p = await call('donor.broadcasts.preview', s.id);
+      const bad = !p.count || p.missing.length || !p.template;
+      $('#prev', m).innerHTML = '<div class="card" style="margin-top:12px"><h2>Check before approving</h2><p><b>' + p.count + ' people</b>: ' + p.by_whatsapp + ' by WhatsApp, ' + p.by_email + ' by email' + (p.unreachable ? '. <b>' + p.unreachable + ' more in these segments have neither opt-in and are left out</b>' : '') + (p.by_tags ? '. ' + p.by_tags + ' in these segments are left out by the tag filter' : '') + '. Someone with both opt-ins gets both.</p>' +
+        (p.sample ? '<label>Sample for ' + esc(p.sample.donor) + '</label><div class="wa">' + (p.media ? (p.media.type === 'image' ? '<a href="' + esc(p.media.view_url) + '" target="_blank" rel="noopener"><img src="' + esc(p.media.thumb_url) + '" alt="Attached image" style="display:block;max-width:100%;max-height:220px;border-radius:8px;margin-bottom:8px"></a>' : '<a href="' + esc(p.media.view_url) + '" target="_blank" rel="noopener" style="display:block;margin-bottom:8px">\ud83d\udcc4 PDF attached (open)</a>') : '') + esc(p.sample.text) + '</div>' + (p.email_note ? '<p class="small muted" style="margin:4px 0 0">' + esc(p.email_note) + '</p>' : '') : '<p class="muted">Choose a template to see the text.</p>') +
+        (p.missing.length ? '<div class="alert" style="margin-top:10px">' + p.missing.map(esc).join('<br>') + '</div>' : '') +
+        dRecipientsHtml(p) +
+        // which channels to send on: both on by default; with both off nothing can be approved
+        '<div class="actions" style="align-items:center"><div class="d-chan" role="group" aria-label="Send by">' +
+        '<label class="d-switch"><input type="checkbox" id="ch-wa" role="switch" checked><span class="d-track" aria-hidden="true"></span><span>WhatsApp <span class="muted small">(' + p.by_whatsapp + ')</span></span></label>' +
+        '<label class="d-switch"><input type="checkbox" id="ch-em" role="switch" checked><span class="d-track" aria-hidden="true"></span><span>Email <span class="muted small">(' + p.by_email + ')</span></span></label>' +
+        '<span class="small muted" id="ch-note" aria-live="polite"></span></div>' +
+        '<button class="btn primary" id="ap" ' + (bad ? 'disabled' : '') + '>' + (s.send_on && s.send_on > dToday() ? 'Approve and schedule for ' + esc(s.send_on) : 'Approve and send now') + '</button></div></div>';
+      const ap = $('#ap', m);
+      const chan = () => ({ whatsapp: $('#ch-wa', m).checked, email: $('#ch-em', m).checked });
+      const syncChan = () => {
+        const c = chan(), n = p.recipients.filter(r => (c.whatsapp && r.opt_in) || (c.email && r.email)).length;
+        $('#ch-note', m).textContent = !c.whatsapp && !c.email ? 'Turn on WhatsApp, email or both.' : n + ' ' + (n === 1 ? 'person' : 'people') + ' will get it';
+        if (ap) ap.disabled = bad || (!c.whatsapp && !c.email) || !n;
+      };
+      $('#ch-wa', m).onchange = syncChan; $('#ch-em', m).onchange = syncChan; syncChan();
+      if (ap) ap.onclick = async () => {
+        ap.disabled = true;
+        try {
+          const r = await call('donor.broadcasts.approve', s.id, chan()); m.close();
+          if (r.scheduled_for) toast(r.queued + ' message' + (r.queued === 1 ? '' : 's') + ' scheduled for ' + r.scheduled_for + '. They wait in the Queue and go out that day.');
+          else await driveDonorSend('Sending\u2026');
+          views['donor/broadcasts']();
+        }
+        catch (e) { $('#berr', m).innerHTML = errorsHtml(e); ap.disabled = false; }
+      };
+      done();
+    } catch (e) { $('#prev', m).innerHTML = ''; $('#berr', m).innerHTML = errorsHtml(e); done(); }
+  }
+  draw();
+  if (s.id && s.template_id) saveAndPreview();
+}
+
+// ---------- message queue ----------
+views['donor/queue'] = async function () {
+  await dmeta();
+  let size = 20; try { size = Number(localStorage.getItem('ektara-queue-size')) || 20; } catch (e) { /* storage can be blocked */ }
+  const f = { q: '', page: 1, size: [10, 20, 50, 100].indexOf(size) >= 0 ? size : 20 };
+  const all = await call('donor.messages.list', {});
+  // search by contact name or status (the label shown, e.g. "Awaiting trustee", or the plain status, e.g. "held")
+  const matches = m => { const q = f.q.trim().toLowerCase(); return !q || [m.donor_name, m.status, label(m.status)].some(x => String(x || '').toLowerCase().indexOf(q) >= 0); };
+  function draw() {
+    const list = all.filter(matches);
+    const pages = Math.max(1, Math.ceil(list.length / f.size)); f.page = Math.min(Math.max(1, f.page), pages);
+    const from = (f.page - 1) * f.size, shown = list.slice(from, from + f.size);
+    main().innerHTML = '<div class="head"><div><h1>Queue</h1><p class="sub" style="margin:0">Every donor message and why it is waiting. Each message goes by WhatsApp and/or email, as the donor opted in. Only contacts who opted in to that channel get it.</p></div><button class="btn primary" id="go">Send waiting messages now</button></div>' +
+      (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="qq" type="search" value="' + esc(f.q) + '" placeholder="Contact name or status (e.g. queued, held, sent, failed, cancelled)">') + dCount(list.length, all.length, 'message') + '</div><p class="small muted" style="margin:6px 0 0">The newest 1000 messages.</p></div>' : '') +
+      '<div class="card scroll">' + (list.length ? '<table><thead><tr><th>Contact</th><th>Message</th><th>Status</th><th>Why / details</th><th>Updated</th><th></th></tr></thead><tbody>' + shown.map(m =>
+        '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(String(m.message_type || '').replace(/_/g, ' ')) + '<div class="muted">' + dTrig(m.trigger) + ' · ' + esc(dChannel(m)) + '</div></td><td>' + dBadge(m.status) + '</td>' +
+        '<td class="small muted">' + esc(m.hold_reason || m.wa_error || (m.status === 'queued' && m.not_before && Date.parse(m.not_before) > Date.now() ? 'Scheduled for ' + fmtDate(m.not_before) : '')) + (m.reply_text ? '<br>“' + esc(m.reply_text) + '”' : '') + '</td><td class="small muted">' + esc(timeAgo(m.updated_at)) + '</td>' +
+        '<td style="white-space:nowrap">' + (['queued', 'held', 'awaiting_confirmation'].indexOf(m.status) >= 0 ? '<button class="btn small" data-c="' + m.id + '">Cancel</button>' : m.status === 'failed' ? '<button class="btn small" data-rt="' + m.id + '">Retry</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
+        // footer: rows per page and page n / total (same as the Contacts page)
+        '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '–' + (from + shown.length) + ' of ' + list.length + '</span>' +
+        '<label class="d-pager-size">Rows per page <select id="psize">' + [10, 20, 50, 100].map(n => opt(n, n, n === f.size)).join('') + '</select></label>' +
+        '<span class="d-pager-nav"><button class="btn small" id="pprev"' + (f.page <= 1 ? ' disabled' : '') + ' aria-label="Previous page">‹ Prev</button><span class="small"><b>' + f.page + '</b> / ' + pages + '</span><button class="btn small" id="pnext"' + (f.page >= pages ? ' disabled' : '') + ' aria-label="Next page">Next ›</button></span></div>'
+        : all.length ? '<div class="empty">No messages match \u201c' + esc(f.q) + '\u201d.</div>' : emptyState('list', 'Nothing here', 'Messages appear in the queue as soon as a broadcast is approved, or when the T7 rule creates one.', null)) + '</div>';
+    const qq = $('#qq'); if (qq) qq.oninput = e => { f.q = e.target.value; f.page = 1; const pos = e.target.selectionStart; draw(); const n = $('#qq'); n.focus(); n.setSelectionRange(pos, pos); };
+    if ($('#psize')) $('#psize').onchange = e => { f.size = Number(e.target.value); f.page = 1; try { localStorage.setItem('ektara-queue-size', f.size); } catch (err) { /* ignore */ } draw(); };
+    if ($('#pprev')) $('#pprev').onclick = () => { f.page--; draw(); };
+    if ($('#pnext')) $('#pnext').onclick = () => { f.page++; draw(); };
+    $('#go').onclick = async () => { const n = await driveDonorSend(); toast(n + ' sent'); views['donor/queue'](); };
+    $$('[data-c]').forEach(b => b.onclick = async () => { try { await call('donor.messages.cancel', b.dataset.c); views['donor/queue'](); } catch (e) { toast(e.message, true); } });
+    $$('[data-rt]').forEach(b => b.onclick = async () => { try { await call('donor.messages.retry', b.dataset.rt); await driveDonorSend('Retrying…'); views['donor/queue'](); } catch (e) { toast(e.message, true); } });
+  }
+  draw();
+};
+
+
+</script>

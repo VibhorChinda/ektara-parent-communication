@@ -1,0 +1,537 @@
+<!-- JsCore: helpers, router, landing and theme, Organisation Overview, command palette and shortcuts, logo. Loads first. Pasted into Index.html by include_(). -->
+<script>
+// ---------- helpers ----------
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+
+function call(method, ...args) {
+  // The button that was just clicked shows a spinner until this request ends (also stops double clicks).
+  const btn = state.clicked && Date.now() - state.clicked.t < 120 && state.clicked.b.isConnected ? state.clicked.b : null; state.clicked = null;
+  if (btn) { btn.classList.add('is-busy'); btn.setAttribute('aria-busy', 'true'); }
+  netStart();
+  const settle = reachable => { netEnd(); setOnline(reachable); if (btn) { btn.classList.remove('is-busy'); btn.removeAttribute('aria-busy'); } };
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(r => {
+        settle(true);
+        if (r && r.ok) return resolve(r.data);
+        const e = new Error((r && r.error) || 'Request failed'); e.errors = r && r.errors; e.status = r && r.status;
+        if (method !== 'session') guard(e);
+        reject(e);
+      })
+      .withFailureHandler(err => {
+        settle(false);
+        const msg = (err && err.message) || String(err);
+        const e = new Error(msg); if (/sign.?in|log.?in|session|not signed|authori[sz]/i.test(msg)) e.status = 401;
+        if (method !== 'session') guard(e);
+        reject(e);
+      })
+      .api(method, args);
+  });
+}
+// 401: session expired. 403: permissions changed (the server said no): go back to the landing screen.
+function guard(e) {
+  if (e.status === 401) showExpired();
+  else if (e.status === 403 && !state.busy403) {
+    state.busy403 = true;
+    setTimeout(() => { state.busy403 = false; showLanding({ notice: 'Your access has changed. Here is what you can open now.' }); }, 0);
+  }
+}
+
+// ---------- icons ----------
+const svgi = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+const ICON = {
+  check: svgi('<path d="m5 12.5 4.5 4.5L19 7.5"/>'), alert: svgi('<path d="M12 8v5m0 3.5v.01"/><circle cx="12" cy="12" r="9"/>'),
+  search: svgi('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'), sun: svgi('<circle cx="12" cy="12" r="4"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/>'),
+  moon: svgi('<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>'), auto: svgi('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/>'),
+  send: svgi('<path d="m21 3-9.5 18-2.2-7.8L2 11z"/><path d="m21 3-11.7 10.2"/>'), users: svgi('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>'),
+  file: svgi('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>'), grid: svgi('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+  heart: svgi('<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/>'), radio: svgi('<circle cx="12" cy="12" r="2"/><path d="M8 8a5.7 5.7 0 0 0 0 8m8-8a5.7 5.7 0 0 1 0 8M5 5a10 10 0 0 0 0 14m14-14a10 10 0 0 1 0 14"/>'),
+  list: svgi('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>'), plus: svgi('<path d="M12 5v14M5 12h14"/>'), upload: svgi('<path d="M12 16V4m0-0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
+  cog: svgi('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'), shield: svgi('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/>'),
+  kbd: svgi('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'), swap: svgi('<path d="M7 7h12l-3-3M17 17H5l3 3"/>'), home: svgi('<path d="m4 11 8-7 8 7M6 10v9h12v-9"/>')
+};
+const NAVS = {
+  nav: [['campaigns', 'Campaigns', 'send'], ['parents', 'Parent Info', 'users'], ['templates', 'Templates', 'file']],
+  dnav: [['donor/home', 'Overview', 'grid'], ['donor/donors', 'Contacts', 'heart'], ['donor/campaigns', 'Campaigns', 'send'], ['donor/templates', 'Templates', 'file'], ['donor/broadcasts', 'Broadcasts', 'radio'], ['donor/queue', 'Queue', 'list']]
+};
+Object.keys(NAVS).forEach(id => { $('#' + id).innerHTML = NAVS[id].map(n => '<a data-go="' + n[0] + '" href="#"><i class="ni">' + ICON[n[2]] + '</i><span>' + n[1] + '</span></a>').join(''); });
+
+// ---------- the string: Ek Tara's signature loader ----------
+const reduce = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+function stringSvg(size) {
+  const v = ['M6 20 Q60 38 114 20', 'M6 20 Q60 2 114 20', 'M6 20 Q60 32 114 20', 'M6 20 Q60 8 114 20', 'M6 20 Q60 27 114 20', 'M6 20 Q60 13 114 20', 'M6 20 Q60 22 114 20', 'M6 20 Q60 20 114 20', 'M6 20 Q60 20 114 20'];
+  const anim = reduce() ? '' : '<animate attributeName="d" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.1;.22;.34;.47;.6;.74;.88;1" keySplines="' + v.slice(1).map(() => '.37 0 .63 1').join(';') + '" values="' + v.join(';') + '"/>';
+  return '<svg class="string ' + (size || 'sm') + '" viewBox="0 0 120 40" aria-hidden="true" focusable="false"><circle cx="6" cy="20" r="3"/><circle cx="114" cy="20" r="3"/><path d="M6 20 Q60 20 114 20">' + anim + '</path></svg>';
+}
+if (reduce()) $$('#splash animate').forEach(a => a.remove());
+function hideSplash() {
+  const sp = $('#splash'); if (!sp) return;
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 450); }, Math.max(0, 900 - performance.now()));
+}
+
+// ---------- skeleton screens (shown while a view loads) ----------
+const skRows = n => Array.from({ length: n }, () => '<div class="sk-row"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>').join('');
+function skeleton(kind) {
+  return '<div role="status" aria-label="Loading"><div class="sk-top">' + stringSvg('sm') + '<span>Loading</span></div><div class="sk sk-h1"></div><div class="sk sk-sub"></div>' +
+    (kind === 'tiles' ? '<div class="sk-tiles">' + Array.from({ length: 7 }, () => '<div class="sk sk-tile"></div>').join('') + '</div><div class="card" style="margin-top:16px">' + skRows(3) + '</div>'
+      : '<div class="card">' + skRows(6) + '</div>') + '</div>';
+}
+const loading = kind => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); m.innerHTML = skeleton(kind); };
+
+// ---------- network activity, connection status ----------
+let pendingCalls = 0;
+function netStart() { pendingCalls++; $('#topbar').classList.add('on'); }
+function netEnd() { pendingCalls = Math.max(0, pendingCalls - 1); if (!pendingCalls) $('#topbar').classList.remove('on'); }
+function setOnline(ok) {
+  const el = $('#foot-status'); if (!el) return;
+  el.classList.toggle('off', !ok); el.textContent = ok ? 'Connected' : 'Connection problem';
+}
+window.addEventListener('offline', () => { if ($('#offline')) return; const b = document.createElement('div'); b.id = 'offline'; b.setAttribute('role', 'alert'); b.textContent = 'You are offline. Changes cannot be saved until you reconnect.'; document.body.appendChild(b); setOnline(false); });
+window.addEventListener('online', () => { const b = $('#offline'); if (b) b.remove(); setOnline(true); toast('Back online'); });
+
+// ---------- toasts ----------
+function toast(msg, isErr) {
+  const box = $('#toasts'); while (box.children.length >= 4) box.firstChild.remove();
+  const t = document.createElement('div'); t.className = 'toast' + (isErr ? ' err' : ''); t.setAttribute('role', isErr ? 'alert' : 'status');
+  t.innerHTML = '<span class="ti">' + (isErr ? ICON.alert : ICON.check) + '</span><span class="tm"></span><i class="tp"></i>';
+  t.querySelector('.tm').textContent = msg;
+  const life = isErr ? 7000 : 3800; t.style.setProperty('--life', life + 'ms');
+  box.appendChild(t);
+  let timer = setTimeout(rm, life);
+  function rm() { t.classList.add('out'); setTimeout(() => t.remove(), 200); }
+  t.onmouseenter = () => { clearTimeout(timer); t.classList.add('hold'); };
+  t.onmouseleave = () => { t.classList.remove('hold'); timer = setTimeout(rm, 1800); };
+  t.onclick = rm;
+}
+
+// ---------- modals: focus trap, Esc, restores focus, bottom sheet on phones ----------
+function autoLabel(root) {
+  $$('label', root).forEach(l => { if (l.htmlFor) return; const c = l.parentElement && l.parentElement.querySelector('input,select,textarea'); if (c && c.id) l.htmlFor = c.id; });
+}
+function modal(html, wide) {
+  const o = document.createElement('div'); o.className = 'overlay';
+  o.innerHTML = '<div class="modal' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true" tabindex="-1">' + html + '</div>';
+  const panel = o.firstChild, prev = document.activeElement;
+  o.addEventListener('mousedown', e => { if (e.target === o && !o.dataset.noesc) o.close(); });
+  document.body.appendChild(o); document.body.classList.add('noscroll');
+  const h = panel.querySelector('h1,h2'); if (h) { if (!h.id) h.id = 'mh' + Date.now() % 1e6; panel.setAttribute('aria-labelledby', h.id); }
+  autoLabel(panel);
+  o.close = () => {
+    if (!o.isConnected) return; o.remove();
+    if (!$('.overlay')) document.body.classList.remove('noscroll');
+    if (prev && prev.isConnected && prev !== document.body) { try { prev.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  };
+  const first = panel.querySelector('input:not([type=hidden]),select,textarea'); (first || panel).focus({ preventScroll: true });
+  return o;
+}
+document.addEventListener('keydown', e => {
+  const top = Array.from(document.querySelectorAll('.overlay')).pop(); if (!top) return;
+  if (e.key === 'Escape' && !top.dataset.noesc && top.close) { e.preventDefault(); top.close(); return; }
+  if (e.key !== 'Tab') return;
+  const f = Array.from(top.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])')).filter(x => x.offsetParent !== null);
+  if (!f.length) return;
+  const i = f.indexOf(document.activeElement);
+  if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+});
+
+// ---------- empty states, count-up, success mark ----------
+function emptyState(icon, title, text, btn) {
+  return '<div class="empty-state"><div class="es-ico">' + ICON[icon] + '</div><h3>' + esc(title) + '</h3><p>' + esc(text) + '</p>' + (btn ? '<button class="btn primary" ' + btn.attr + '>' + esc(btn.label) + '</button>' : '') + '</div>';
+}
+const fmtNum = n => Number(n).toLocaleString('en-IN');
+function countUp(root) {
+  $$('[data-count]', root).forEach(el => {
+    const to = Number(el.dataset.count) || 0;
+    if (reduce() || to < 3) { el.textContent = fmtNum(to); return; }
+    const t0 = performance.now();
+    (function step(t) { const p = Math.min(1, (t - t0) / 700); el.textContent = fmtNum(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(step); })(t0);
+  });
+}
+const CHECKMARK = '<svg class="okmark" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="23"/><path d="M15 27l8 8 14-17"/></svg>';
+async function showDone(m, text, sub) {
+  const p = m.querySelector('.modal'); if (!p) return;
+  p.innerHTML = '<div class="done" role="status">' + CHECKMARK + '<h2>' + esc(text) + '</h2>' + (sub ? '<p class="muted" style="margin:0">' + esc(sub) + '</p>' : '') + '</div>';
+  await new Promise(r => setTimeout(r, reduce() ? 500 : 1100));
+}
+
+const fmtDate = iso => iso ? new Date(iso).toLocaleString(undefined, { day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+function timeAgo(iso) {
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return 'just now'; if (m < 60) return m + ' min ago';
+  const h = Math.floor(m / 60); if (h < 24) return h + ' h ago';
+  const d = Math.floor(h / 24); return d < 7 ? d + ' d ago' : fmtDate(iso);
+}
+// When a status changed: "10:42 AM" today, otherwise "12 Nov, 10:42 AM".
+function statusTime(iso) {
+  if (!iso) return '';
+  const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+  return w.toDateString() === new Date().toDateString() ? t : w.toLocaleDateString(undefined, { day:'numeric', month:'short' }) + ', ' + t;
+}
+function callTime(iso) {
+  const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }), n = new Date(), tm = new Date(n); tm.setDate(n.getDate() + 1);
+  if (w.toDateString() === n.toDateString()) return 'around ' + t + ' today';
+  if (w.toDateString() === tm.toDateString()) return 'around ' + t + ' tomorrow';
+  return 'around ' + t + ', ' + w.toLocaleDateString(undefined, { day:'numeric', month:'short' });
+}
+const money = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style:'currency', currency:cur, maximumFractionDigits:0 }).format(n); } catch (e) { return Math.round(n) + ' ' + cur; } };
+const LABELS = { pending_meta:'Pending Meta', flagged:'Needs follow-up', awaiting_confirmation:'Awaiting trustee', held:'Held', skipped:'Skipped' };
+const label = s => LABELS[s] || (s.charAt(0).toUpperCase() + s.slice(1));
+const badge = s => '<span class="badge b-' + esc(s) + '">' + esc(label(s)) + '</span>';
+const placeholders = body => Array.from(new Set((String(body).match(/\{\{(\d+)\}\}/g) || []).map(x => parseInt(x.slice(2), 10)))).sort((a, b) => a - b);
+const GROUPS = [
+  { key:'confirmed', label:'Confirmed', statuses:['confirmed'] }, { key:'declined', label:'Declined', statuses:['declined'] },
+  { key:'awaiting', label:'Awaiting reply', statuses:['queued','sent','delivered','read'] },
+  { key:'flagged', label:'Needs follow-up', statuses:['flagged'] }, { key:'failed', label:'Failed', statuses:['failed'] },
+  { key:'cancelled', label:'Cancelled', statuses:['cancelled'] }
+];
+const gcount = (counts, st) => st.reduce((s, k) => s + (counts[k] || 0), 0);
+function progressBar(counts) {
+  const total = counts.total || 0;
+  if (!total) return '<div class="bar2"></div>';
+  return '<div class="bar2">' + GROUPS.map(g => { const n = gcount(counts, g.statuses); return n ? '<span class="c-' + g.key + '" style="width:' + (n / total * 100) + '%" title="' + g.label + ': ' + n + '"></span>' : ''; }).join('') + '</div>';
+}
+function errorsHtml(e) {
+  if (e.errors && e.errors.length > 1) return '<div class="alert">' + esc(e.errors[0]) + '<ul>' + e.errors.slice(1).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+  return '<div class="alert">' + esc(e.message) + '</div>';
+}
+function errorsListHtml(e) {
+  if (e.errors && e.errors.length) return '<div class="alert"><ul>' + e.errors.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+  return '<div class="alert">' + esc(e.message) + '</div>';
+}
+const main = () => $('#main');
+
+// Choice helpers for institution -> class/year -> section
+function tally(items, keyFn, countFn) {
+  const m = new Map(); items.forEach(i => { const k = keyFn(i); if (k) m.set(k, (m.get(k) || 0) + countFn(i)); });
+  return Array.from(m, ([value, count]) => ({ value, count })).sort((a, b) => natural(a.value, b.value));
+}
+const tip = text => '<span class="tip" tabindex="0" data-tip="' + esc(text) + '" aria-label="' + esc(text) + '">?</span>';
+const opt = (v, text, sel) => '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(text) + '</option>';
+// English and Indian languages that Meta supports for WhatsApp templates (codes as Meta lists them).
+const TEMPLATE_LANGUAGES = [['en', 'English'], ['bn', 'Bengali'], ['bn_IN', 'Bengali (India)'], ['gu', 'Gujarati'], ['hi', 'Hindi'], ['kn', 'Kannada'], ['ml', 'Malayalam'],
+  ['mr', 'Marathi'], ['pa', 'Punjabi'], ['ta', 'Tamil'], ['te', 'Telugu'], ['ur', 'Urdu']];
+const languageSelect = (id, sel) => '<select id="' + id + '">' + TEMPLATE_LANGUAGES.map(l => opt(l[0], l[1] + ' (' + l[0] + ')', l[0] === sel)).join('') + '</select>';
+
+// ---------- router ----------
+const state = { info: null, notices: [] };
+const views = {};
+const TILE_VIEWS = ['donor/home', 'overview/home'];
+async function go(view, arg) {
+  clearInterval(state.refresh); clearTimeout(state.timer); state.view = view;   // opening a screen cancels the welcome screen's automatic redirect
+  $$('#nav a, #dnav a').forEach(a => { const on = a.dataset.go === view || a.dataset.go === view.split('/')[0]; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  loading(TILE_VIEWS.indexOf(view) >= 0 ? 'tiles' : 'table'); window.scrollTo({ top: 0, behavior: 'auto' });
+  try { await views[view](arg); }
+  catch (e) { if (e.status === 403 || e.status === 401) return; main().innerHTML = '<div class="alert">' + esc(e.message) + '</div>'; }
+  finally { settleView(); }
+}
+// After a view renders: quiet fade-in, keyboard access for clickable rows, labels, focus for screen readers.
+function settleView() {
+  const m = main(); m.removeAttribute('aria-busy');
+  $$('tr.click, .chip, .tile[data-seg]', m).forEach(x => { if (!x.hasAttribute('tabindex')) { x.tabIndex = 0; x.setAttribute('role', x.tagName === 'TR' ? 'button' : 'button'); } });
+  autoLabel(m); countUp(m);
+  m.classList.remove('enter'); void m.offsetWidth; m.classList.add('enter');
+  if (!document.activeElement || document.activeElement === document.body || !m.contains(document.activeElement)) { try { m.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+}
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr.click, .chip, .tile[data-seg]')) { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener('click', e => { const b = e.target.closest('button.btn'); state.clicked = b ? { b: b, t: Date.now() } : null; }, true);
+document.addEventListener('click', e => { const c = e.target.closest('[data-click]'); if (c) { const t = $(c.dataset.click); if (t) t.click(); } });
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-go]'); if (a) { e.preventDefault(); go(a.dataset.go, a.dataset.arg); }
+});
+
+async function loadNotices() {
+  try { state.notices = await call('templates.notifications'); } catch (e) { state.notices = []; }
+}
+function noticesHtml() {
+  return state.notices.map(n => n.status === 'approved'
+    ? '<div class="alert ok">Your template <b>' + esc(n.name) + '</b> (' + esc(n.language) + ') was approved. <a href="#" data-seen="' + n.id + '">Dismiss</a></div>'
+    : '<div class="alert">Your template <b>' + esc(n.name) + '</b> was rejected: ' + esc(n.rejection_reason || '') + ' <a href="#" data-seen="' + n.id + '">Dismiss</a></div>').join('');
+}
+document.addEventListener('click', async e => {
+  const a = e.target.closest('[data-seen]'); if (!a) return; e.preventDefault();
+  await call('templates.seen', a.dataset.seen).catch(() => {});
+  state.notices = state.notices.filter(n => n.id !== a.dataset.seen); a.closest('.alert').remove();
+});
+
+
+// ---------- small helpers used by more than one workspace ----------
+const META_WORDS = { received: 'Received by Twilio, not yet passed to WhatsApp', pending: 'Under review at WhatsApp', paused: 'Paused by WhatsApp', disabled: 'Disabled by WhatsApp' };
+function metaNote(t) {
+  if (t.status !== 'pending_meta') return '';
+  const st = String(t.meta_status || '').toLowerCase(), hrs = Math.floor((Date.now() - new Date(t.updated_at).getTime()) / 3600000);
+  return '<div class="small muted">' + esc(META_WORDS[st] || (st ? 'Status: ' + st : 'Waiting for the first check')) + ' \u00b7 submitted ' + esc(timeAgo(t.updated_at)) + (t.meta_checked_at ? ' \u00b7 checked ' + esc(timeAgo(t.meta_checked_at)) : '') + '</div>' +
+    (hrs >= 48 ? '<div class="small" style="color:var(--warn)">Longer than the usual 48 hours. Check the template in Twilio (Messaging, Content Template Builder) or ask Twilio support.</div>' : '');
+}
+function syncSummary(r) {
+  if (!r.checked) return 'There are no template requests waiting for WhatsApp.';
+  const done = [];
+  if (r.approved) done.push(r.approved + (r.approved === 1 ? ' template was' : ' templates were') + ' approved');
+  if (r.rejected) done.push(r.rejected + (r.rejected === 1 ? ' template was' : ' templates were') + ' rejected');
+  if (done.length) return done.join(' and ') + '.' + (r.waiting && r.waiting.length ? ' The others are still being processed.' : '');
+  return 'Your request is being processed. You will receive an update shortly.';
+}
+const fld = (label, html) => '<div><label>' + label + '</label>' + html + '</div>';
+const val = id => { const e = $('#' + id); return e ? e.value : ''; };
+
+// ---------- landing, divisions, switch ----------
+// ---------- theme: auto / light / dark ----------
+const THEME_ORDER = ['auto', 'light', 'dark'];
+const storedTheme = () => { try { return localStorage.getItem('ektara-theme') || 'auto'; } catch (e) { return 'auto'; } };
+function applyTheme(mode) {
+  const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.mode = mode;
+  $('#themebtn').innerHTML = ICON[mode === 'auto' ? 'auto' : mode === 'dark' ? 'moon' : 'sun'];
+  $('#themebtn').title = 'Theme: ' + mode + ' (click to change)'; $('#f-theme').textContent = 'Theme: ' + label(mode);
+}
+function cycleTheme() {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(storedTheme()) + 1) % 3];
+  try { localStorage.setItem('ektara-theme', next); } catch (e) { /* storage can be blocked */ }
+  applyTheme(next); toast('Theme: ' + label(next));
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener && matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (storedTheme() === 'auto') applyTheme('auto'); });
+$('#themebtn').onclick = cycleTheme; $('#f-theme').onclick = cycleTheme; applyTheme(storedTheme());
+
+const CLIENT_BUILD = '20261107-1230';
+const BOOT_WATCH_MS = window.__bootWatchMs || 15000;
+const IC = {
+  parent: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="16" cy="12" r="5"/><path d="M7 38v-8a9 9 0 0 1 18 0v8"/><circle cx="35" cy="22" r="4"/><path d="M28 38v-5a7 7 0 0 1 14 0v5"/></svg>',
+  donor: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 31s-9-5.6-9-12a5.2 5.2 0 0 1 9-3.4A5.2 5.2 0 0 1 33 19c0 6.4-9 12-9 12z"/><path d="M5 34h8l7 4h12l11-6a3 3 0 0 0-3-5l-8 3"/></svg>',
+  overview: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 40V8"/><path d="M8 40h34"/><rect x="14" y="24" width="6" height="12" rx="1"/><rect x="25" y="16" width="6" height="20" rx="1"/><rect x="36" y="28" width="6" height="8" rx="1"/></svg>',
+  lock: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="10" y="21" width="28" height="19" rx="4"/><path d="M16 21v-5a8 8 0 0 1 16 0v5"/></svg>'
+};
+const DIVS = {
+  parent: { title: 'Parent Communication', color: 'var(--parent)', desc: 'Manage parent engagement, programme communication and follow-ups.', cta: 'Enter Parent Workspace' },
+  donor: { title: 'Donor Communication', color: 'var(--donor)', desc: 'Manage donor engagement, campaigns and communication.', cta: 'Enter Donor Workspace' },
+  overview: { title: 'Organisation Overview', color: 'var(--overview)', desc: 'Consolidated high-level view of Parent and Donor Communication, with cross-division metrics and administrative insights.', cta: 'Open Organisation Overview' }
+};
+const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const accent = id => 'style="--acc:' + DIVS[id].color + '"';
+
+function setShell(id) {
+  document.documentElement.dataset.div = id || '';
+  $('#divbadge').hidden = !id;
+  if (id) { const b = $('#divbadge'); b.textContent = DIVS[id].title; }
+  $('#nav').hidden = id !== 'parent';
+  $('#dnav').hidden = id !== 'donor';
+  const canSwitch = !!(id && state.session && state.session.entries.length >= 2);
+  $('#switch').hidden = !canSwitch; $('#f-switch').hidden = !canSwitch;
+  $('#foot-div').textContent = id ? DIVS[id].title : 'Parent and donor communication';
+}
+function updateAdminBtn() {
+  const b = $('#adminbtn'), admin = !!(state.session && state.session.can_admin);
+  b.hidden = !admin; if (admin) b.innerHTML = ICON.cog;
+}
+$('#adminbtn').onclick = () => go('admin/users');
+function goHome() {
+  const d = state.division;
+  if (d === 'parent') go('campaigns'); else if (d === 'donor') go('donor/home'); else if (d === 'overview') go('overview/home'); else showLanding({});
+}
+// A visible warning, for administrators only, when files come from different versions or the page is older than the server code.
+function checkBuilds(s) {
+  const old = $('#buildwarn'); if (old) old.remove();
+  if (!s || !s.can_admin) return;
+  let msg = '';
+  if (s.build_problem) msg = 'Some files in the Apps Script project are out of date: ' + s.build_problem + '. Replace every file from the latest zip, then deploy a new version.';
+  else if (s.server_build && s.server_build !== CLIENT_BUILD) msg = 'The page (build ' + CLIENT_BUILD + ') and the server code (build ' + s.server_build + ') are different versions. Deploy a new version of the admin app, then hard-refresh.';
+  if (!msg) return;
+  const d = document.createElement('div'); d.id = 'buildwarn'; d.className = 'alert'; d.setAttribute('role', 'alert');
+  d.style.cssText = 'max-width:1120px;margin:12px auto 0;width:calc(100% - 40px)'; d.textContent = msg;
+  document.querySelector('header').after(d);
+}
+function initChrome() {
+  $('#foot-build').textContent = 'Build ' + CLIENT_BUILD;
+  const email = (state.session && state.session.user && state.session.user.email) || $('#foot-user').textContent || '';
+  const name = (state.session && state.session.user && state.session.user.full_name) || email;
+  $('#avatar').textContent = (name.trim().charAt(0) || '?').toUpperCase(); $('#foot-user').textContent = email;
+  $('#foot-year').textContent = new Date().getFullYear();
+}
+$('#switch').onclick = () => showLanding({});
+$('#f-switch').onclick = () => { window.scrollTo({ top: 0 }); showLanding({}); };
+
+function showExpired() {
+  if ($('#expired')) return;
+  const o = document.createElement('div'); o.className = 'overlay'; o.setAttribute('role', 'alertdialog'); o.setAttribute('aria-labelledby', 'expired');
+  o.innerHTML = '<div class="modal"><h2 id="expired">Your session has expired</h2><p>Please reload the page and sign in again.</p><div class="actions"><button class="btn primary" id="rl">Reload</button></div></div>';
+  document.body.appendChild(o);
+  $('#rl', o).onclick = () => { try { window.top.location.reload(); } catch (e) { location.reload(); } };
+  $('#rl', o).focus();
+}
+
+// Permissions come from the server on every visit and on every switch; nothing is cached or assumed here.
+async function showLanding(opts) {
+  opts = opts || {};
+  clearTimeout(state.timer);
+  $$('.overlay').forEach(o => { if (!$('#expired', o)) o.remove(); });
+  setShell(null);
+  main().innerHTML = '<div class="spinner" role="status">Checking your access\u2026</div>';
+  let s;
+  try { s = await call('session'); }
+  catch (e) { s = { mode: 'denied', entries: [], user: {}, reason: e.message }; }
+  state.session = s; updateAdminBtn(); checkBuilds(s);
+  let notice = opts.notice || '';
+  if (!notice && !state.reqHandled && REQUESTED && s.entries.indexOf(REQUESTED) < 0) notice = 'You don\u2019t have access to ' + DIVS[REQUESTED].title + '.';
+  state.reqHandled = true;
+  const note = notice ? '<div class="alert" role="alert" style="max-width:520px;margin:0 auto 18px">' + esc(notice) + '</div>' : '';
+  const m = main();
+
+  if (s.mode === 'denied') {
+    m.innerHTML = '<div class="landing" style="--acc:var(--bad)">' + note +
+      '<div class="lico pop">' + IC.lock + '</div><h1 class="rise d1" tabindex="-1" id="land-h">Access denied</h1>' +
+      '<p class="lead rise d2">' + esc(s.reason || 'Your account isn\u2019t authorised for any workspace yet.') + '</p>' +
+      '<p class="sub2 rise d3">Ask an administrator to grant you access, then check again.</p>' +
+      '<p class="rise d3" style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn primary" id="again">Check again</button>' +
+      (s.contact && s.user && s.user.email ? '<a class="btn" href="mailto:' + esc(s.contact) + '?subject=' + encodeURIComponent('Please give me access to Ek Tara Communications') + '&body=' + encodeURIComponent('Hello,\n\nPlease give this Google account access: ' + s.user.email + '\n\nThank you') + '" style="text-decoration:none">Email an administrator</a>' : '') + '</p></div>';
+    $('#again').onclick = () => showLanding({});
+    $('#land-h').focus();
+    return;
+  }
+
+  if (s.mode === 'single') {
+    const id = s.entries[0], d = DIVS[id], dur = reducedMotion() ? 1400 : 2400;
+    m.innerHTML = '<div class="landing" ' + accent(id) + ' role="status" aria-live="polite">' + note +
+      '<div class="lico pop">' + IC[id] + '</div>' +
+      '<h1 class="rise d1" tabindex="-1" id="land-h">Welcome back!</h1>' +
+      '<p class="lead rise d2">You\u2019re authorised to access ' + esc(d.title) + '.</p>' +
+      '<div class="prog rise d3" style="--dur:' + (dur / 1000) + 's"><i></i></div>' +
+      '<p class="sub2 rise d3">Taking you to your ' + esc(d.title) + ' workspace...</p>' +
+      '<p class="rise d4" style="margin-top:14px"><button class="btn small" id="now">Continue now</button></p></div>';
+    $('#now').onclick = () => enterDivision(id);
+    $('#land-h').focus();
+    state.timer = setTimeout(() => enterDivision(id), dur);
+    return;
+  }
+
+  const both = s.entries.indexOf('parent') >= 0 && s.entries.indexOf('donor') >= 0;
+  m.innerHTML = '<div class="landing">' + note +
+    '<h1 class="rise d1" tabindex="-1" id="land-h">Welcome back!</h1>' +
+    '<p class="lead rise d2">Choose a workspace to continue.</p>' +
+    (s.user.role === 'admin' && both ? '<span class="pill rise d3">Administrator \u00b7 you have access to both workspaces</span>' : '') +
+    '<div class="dcards" role="group" aria-label="Workspaces">' + s.entries.map((id, i) =>
+      '<button class="dcard rise d' + Math.min(4, i + 2) + '" ' + accent(id) + ' data-div="' + id + '">' +
+      '<span class="lico" aria-hidden="true">' + IC[id] + '</span>' +
+      '<h2>' + esc(DIVS[id].title) + (s.last_division === id ? '<span class="tag">Last used</span>' : '') + '</h2>' +
+      '<p>' + esc(DIVS[id].desc) + '</p><span class="go">' + esc(DIVS[id].cta) + '</span></button>').join('') + '</div></div>';
+  $$('.dcard').forEach(b => b.onclick = () => enterDivision(b.dataset.div));
+  const first = $('.dcard[data-div="' + s.last_division + '"]') || $('.dcard');
+  if (first) first.focus(); else $('#land-h').focus();
+}
+
+// Permissions are checked again here, so a switch never uses stale access.
+async function enterDivision(id) {
+  clearTimeout(state.timer);
+  let s;
+  try { s = await call('session'); } catch (e) { return showLanding({ notice: e.message }); }
+  state.session = s; updateAdminBtn();
+  if (s.entries.indexOf(id) < 0) return showLanding({ notice: 'Your access to ' + DIVS[id].title + ' has changed.' });
+  call('prefs.setDivision', id).catch(() => {}); // remembering a choice never grants access
+  state.division = id;
+  setShell(id);
+  if (id === 'parent') { loadNotices(); go('campaigns'); }
+  else if (id === 'donor') go('donor/home');
+  else go('overview/home');
+}
+
+views['overview/home'] = async function () {
+  const o = await call('overview.summary'), p = o.parent, d = o.donor, tile = (n, t) => '<div class="tile"><b data-count="' + (n || 0) + '">' + (n || 0) + '</b>' + t + '</div>';
+  main().innerHTML = '<div class="head"><div><h1>Organisation Overview</h1><p class="sub">Totals only. No names, phone numbers or messages are shown here, and you do not need access to either department\u2019s data to see them.</p></div>' +
+    (o.updated_at ? '<span class="muted small">Updated ' + esc(timeAgo(o.updated_at)) + '</span>' : '') + '</div>' +
+    '<div class="card"><h2>Parent Communication</h2>' + (p ? '<div class="tiles">' + tile(p.parents, 'Parents') + tile(p.campaigns, 'Campaigns') + tile(p.messages, 'Messages sent') + tile(p.answered, 'Answered') + '</div>' : '<p class="muted">No totals yet. They appear after the next background run (every 10 minutes).</p>') + '</div>' +
+    '<div class="card"><h2>Donor Communication</h2>' + (d ? '<div class="tiles">' + tile(d.donors, 'Donors and leads') + tile(d.opted_in, 'WhatsApp opt-in') + tile(d.campaigns, 'Campaigns') + tile(d.donations, 'Donations recorded') + tile(d.messages_sent_7d, 'Messages sent, last 7 days') + tile(d.held, 'Held by the rules') + tile(d.failed, 'Failed') + '</div>' +
+      '<div class="chips" style="margin-bottom:0">' + Object.keys(d.segments || {}).map(c => '<span class="chip" style="cursor:default" tabindex="-1">' + esc(c) + ' ' + d.segments[c] + '</span>').join('') + '</div>' : '<p class="muted">No totals yet. They appear after the next background run (every 10 minutes).</p>') + '</div>';
+};
+
+// ---------- command palette (Ctrl/Cmd K) and keyboard shortcuts ----------
+function paletteItems() {
+  const e = (state.session && state.session.entries) || [], d = state.division, items = [];
+  const goto = (v, label, icon, hint) => ({ group: 'Go to', label, icon, hint, run: () => go(v) });
+  if (d === 'parent') {
+    items.push(goto('campaigns', 'Campaigns', 'send', 'G C'), goto('parents', 'Parents', 'users', 'G P'), goto('templates', 'Templates', 'file', 'G T'));
+    items.push({ group: 'Do', label: 'New campaign', icon: 'plus', run: () => go('campaigns/new') }, { group: 'Do', label: 'Upload parents (CSV)', icon: 'upload', run: async () => { await go('parents'); const b = $('#upload'); if (b) b.click(); } },
+      { group: 'Do', label: 'Request a template', icon: 'plus', run: () => go('templates/new') });
+  }
+  if (d === 'donor') {
+    items.push(goto('donor/home', 'Overview', 'grid', 'G O'), goto('donor/donors', 'Contacts', 'heart', 'G D'), goto('donor/campaigns', 'Campaigns', 'send', 'G C'), goto('donor/templates', 'Templates', 'file', 'G T'), goto('donor/broadcasts', 'Broadcasts', 'radio', 'G B'), goto('donor/queue', 'Queue', 'list', 'G Q'));
+    items.push({ group: 'Do', label: 'Add a contact', icon: 'plus', run: () => donorForm(null) }, { group: 'Do', label: 'Upload contacts (CSV)', icon: 'upload', run: async () => { await go('donor/donors'); const b = $('#up'); if (b) b.click(); } },
+      { group: 'Do', label: 'New broadcast', icon: 'plus', run: async () => { await go('donor/broadcasts'); const b = $('#new'); if (b) b.click(); } },
+      { group: 'Do', label: 'Send waiting messages now', icon: 'send', run: async () => { const n = await driveDonorSend(); toast(n + ' messages sent'); } });
+  }
+  if (e.length >= 2) items.push({ group: 'Workspace', label: 'Switch division', icon: 'swap', run: () => showLanding({}) });
+  e.filter(x => x !== d).forEach(x => items.push({ group: 'Workspace', label: 'Open ' + DIVS[x].title, icon: x === 'donor' ? 'heart' : x === 'parent' ? 'users' : 'grid', run: () => enterDivision(x) }));
+  if (state.session && state.session.can_admin) items.push({ group: 'App', label: 'Users and access', icon: 'shield', run: () => go('admin/users') });
+  items.push({ group: 'App', label: 'Change theme', icon: 'sun', run: cycleTheme }, { group: 'App', label: 'Keyboard shortcuts', icon: 'kbd', hint: '?', run: showShortcuts });
+  return items;
+}
+function openPalette() {
+  if ($('.overlay.cmd')) return;
+  if (!state.session) return;
+  const o = document.createElement('div'); o.className = 'overlay cmd'; const prev = document.activeElement;
+  o.innerHTML = '<div class="cmdk" role="dialog" aria-modal="true" aria-label="Search or jump to"><div class="cmdk-in">' + ICON.search + '<input id="cmd-q" role="combobox" aria-expanded="true" aria-controls="cmd-list" autocomplete="off" placeholder="Search pages and actions' + (state.division === 'donor' ? ', or a donor\u2019s name' : '') + '"></div><ul class="cmdk-list" id="cmd-list" role="listbox"></ul><div class="cmdk-foot"><span><kbd>\u2191</kbd> <kbd>\u2193</kbd> to move</span><span><kbd>Enter</kbd> to open</span><span><kbd>Esc</kbd> to close</span></div></div>';
+  o.addEventListener('mousedown', e => { if (e.target === o) o.close(); });
+  document.body.appendChild(o); document.body.classList.add('noscroll');
+  o.close = () => { if (!o.isConnected) return; o.remove(); if (!$('.overlay')) document.body.classList.remove('noscroll'); if (prev && prev.isConnected) try { prev.focus({ preventScroll: true }); } catch (e) { /* ignore */ } };
+  const inp = $('#cmd-q', o), list = $('#cmd-list', o); let rows = [], sel = 0, found = [], timer = null, seq = 0;
+  const match = (q, t) => { q = q.toLowerCase(); t = t.toLowerCase(); if (t.indexOf(q) === 0) return 3; if (t.indexOf(q) >= 0) return 2; return q.length >= 2 && t.split(/\s+/).map(w => w.charAt(0)).join('').indexOf(q) >= 0 ? 1 : 0; };
+  function draw() {
+    const q = inp.value.trim(), base = paletteItems().filter(i => !q || match(q, i.label)).sort((a, b) => !q ? 0 : match(q, b.label) - match(q, a.label));
+    rows = found.concat(base); sel = Math.min(sel, Math.max(0, rows.length - 1));
+    let g = '';
+    list.innerHTML = rows.length ? rows.map((r, i) => { const head = r.group !== g ? '<li class="cmdk-group" role="presentation">' + esc(r.group) + '</li>' : ''; g = r.group;
+      return head + '<li role="option" id="cmd-' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '">' + ICON[r.icon || 'search'] + '<span>' + esc(r.label) + '</span>' + (r.hint ? '<small>' + esc(r.hint) + '</small>' : '') + '</li>'; }).join('') : '<li class="cmdk-group" style="cursor:default">Nothing matches \u201c' + esc(q) + '\u201d</li>';
+    inp.setAttribute('aria-activedescendant', rows.length ? 'cmd-' + sel : ''); const cur = $('#cmd-' + sel, o); if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function run(i) { const r = rows[i]; if (!r) return; o.close(); setTimeout(() => r.run(), 0); }
+  inp.oninput = () => {
+    sel = 0; clearTimeout(timer); const q = inp.value.trim();
+    if (state.division === 'donor' && q.length >= 2) timer = setTimeout(async () => { const my = ++seq; try { const ds = await call('donor.donors.list', { q }); if (my !== seq) return; found = ds.slice(0, 5).map(d => ({ group: 'Contacts', label: d.name, icon: 'heart', hint: d.segment, run: () => donorModal(d.id) })); draw(); } catch (e) { /* ignore */ } }, 220);
+    else found = [];
+    draw();
+  };
+  inp.onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % Math.max(1, rows.length); draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + rows.length) % Math.max(1, rows.length); draw(); }
+    else if (e.key === 'Enter') { e.preventDefault(); run(sel); }
+    else if (e.key === 'Escape') { e.preventDefault(); o.close(); }
+  };
+  list.onclick = e => { const li = e.target.closest('li[data-i]'); if (li) run(Number(li.dataset.i)); };
+  list.onmousemove = e => { const li = e.target.closest('li[data-i]'); if (li && Number(li.dataset.i) !== sel) { sel = Number(li.dataset.i); $$('li[role=option]', list).forEach(x => x.setAttribute('aria-selected', x.dataset.i == sel)); } };
+  draw(); inp.focus();
+}
+$('#cmdbtn').onclick = openPalette;
+
+function showShortcuts() {
+  const d = state.division, rows = [['Ctrl K or Cmd K', 'Search pages, actions and donors'], ['?', 'Show this list'], ['Esc', 'Close a window']];
+  if (d === 'parent') rows.push(['G then C', 'Campaigns'], ['G then P', 'Parents'], ['G then T', 'Templates']);
+  if (d === 'donor') rows.push(['G then O', 'Overview'], ['G then D', 'Contacts'], ['G then C', 'Campaigns'], ['G then T', 'Templates'], ['G then B', 'Broadcasts'], ['G then Q', 'Queue']);
+  const m = modal('<h2>Keyboard shortcuts</h2><dl class="keys">' + rows.map(r => '<dt>' + r[0].split(' ').map(k => /^(or|then)$/.test(k) ? ' ' + k + ' ' : '<kbd>' + esc(k) + '</kbd>').join('') + '</dt><dd>' + esc(r[1]) + '</dd>').join('') + '</dl><div class="actions"><button class="btn primary" id="x">Done</button></div>');
+  $('#x', m).onclick = m.close;
+}
+$('#f-keys').onclick = showShortcuts;
+let gPending = false, gTimer = null;
+const G_MAP = { parent: { c: 'campaigns', p: 'parents', t: 'templates' }, donor: { o: 'donor/home', d: 'donor/donors', c: 'donor/campaigns', t: 'donor/templates', b: 'donor/broadcasts', q: 'donor/queue' } };
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if ($('.overlay.cmd')) $('.overlay.cmd').close(); else openPalette(); return; }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || $('.overlay')) return;
+  if (e.key === '?') { e.preventDefault(); showShortcuts(); return; }
+  if (e.key === '/' && $('#q')) { e.preventDefault(); $('#q').focus(); return; }
+  if (gPending) { clearTimeout(gTimer); gPending = false; const v = (G_MAP[state.division] || {})[e.key.toLowerCase()]; if (v) { e.preventDefault(); go(v); } return; }
+  if (e.key.toLowerCase() === 'g' && G_MAP[state.division]) { gPending = true; gTimer = setTimeout(() => { gPending = false; }, 1200); }
+});
+
+// ---------- logo (imported from Drive by the project owner) ----------
+function applyLogo() {
+  if (!LOGO) return;
+  const probe = new Image();
+  probe.onload = () => {
+    document.documentElement.dataset.logo = probe.naturalWidth / probe.naturalHeight > 2.2 ? 'wide' : 'square';
+    $$('.mark').forEach(svg => { const i = document.createElement('img'); i.className = 'mark-img'; i.src = LOGO; i.alt = ''; svg.replaceWith(i); });
+    const sp = $('.sp-in'); if (sp) { const big = document.createElement('img'); big.className = 'sp-logo'; big.src = LOGO; big.alt = 'Ek Tara'; sp.insertBefore(big, sp.firstChild); }
+  };
+  probe.src = LOGO;   // if the image cannot be read the built-in mark stays
+}
+</script>

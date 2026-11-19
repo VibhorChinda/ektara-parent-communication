@@ -1,0 +1,478 @@
+<!-- JsParent: Parent Communication screens (campaigns, Parent Info, templates). Pasted into Index.html by include_(). -->
+<script>
+// ---------- campaigns: list ----------
+views.campaigns = async function () {
+  await loadNotices();
+  const [groups, list] = await Promise.all([call('parents.groups'), call('campaigns.list', {})]);
+  let rows = list, offset = list.length;
+  const f = { institution: '', class_or_year: '', section: '' };
+
+  function draw() {
+    const insts = tally(groups, g => g.institution, g => g.parent_count);
+    const levels = f.institution ? tally(groups.filter(g => g.institution === f.institution), g => g.class_or_year, g => g.parent_count) : [];
+    const secs = f.class_or_year ? tally(groups.filter(g => g.institution === f.institution && g.class_or_year === f.class_or_year), g => g.section, g => g.parent_count) : [];
+    main().innerHTML = noticesHtml() +
+      '<div class="head"><div><h1>Campaigns</h1><p class="sub" style="margin:0">Announcements sent to parents and how they responded.</p></div>' +
+      '<button class="btn primary" data-go="campaigns/new" data-tip="Send an approved WhatsApp template to one or more schools or classes">New campaign</button></div>' +
+      '<div class="card"><div class="row">' +
+      '<div><label>School</label><select id="f-inst"><option value="">All</option>' + insts.map(i => opt(i.value, i.value, i.value === f.institution)).join('') + '</select></div>' +
+      '<div><label>Grade</label><select id="f-lvl" ' + (f.institution ? '' : 'disabled') + '><option value="">All</option>' + levels.map(i => opt(i.value, i.value, i.value === f.class_or_year)).join('') + '</select></div>' +
+      '<div><label>Section / stream</label><select id="f-sec" ' + (f.class_or_year ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === f.section)).join('') + '</select></div>' +
+      '</div></div>' +
+      (rows.length ? '<div class="card scroll"><table><thead><tr><th>Sent</th><th>Campaign</th><th>Template</th><th>By</th><th>Status</th><th style="min-width:160px">Responses</th></tr></thead><tbody>' +
+        rows.map(c => '<tr class="click" data-go="campaigns/detail" data-arg="' + c.id + '"><td>' + esc(timeAgo(c.created_at)) + '</td><td>' + (c.name ? '<b>' + esc(c.name) + '</b><div class="small muted">' + esc(c.audience) + '</div>' : esc(c.audience)) + '</td><td>' + esc(c.template_name) + '</td><td>' + esc(c.sender || '') + '</td><td>' + badge(c.status) + '</td>' +
+          '<td>' + progressBar(c.counts) + '<div class="small muted">' + gcount(c.counts, ['confirmed', 'declined']) + ' of ' + c.counts.total + ' answered</div></td></tr>').join('') +
+        '</tbody></table></div>' + (rows.length % 50 === 0 ? '<button class="btn" id="more">Load more</button>' : '')
+        : '<div class="card">' + emptyState('send', 'No campaigns yet', 'Send a WhatsApp message to a class or a whole school, then see who has answered.', { label: 'New campaign', attr: 'data-go="campaigns/new"' }) + '</div>');
+    $('#f-inst').onchange = async e => { f.institution = e.target.value; f.class_or_year = ''; f.section = ''; await refetch(); };
+    $('#f-lvl').onchange = async e => { f.class_or_year = e.target.value; f.section = ''; await refetch(); };
+    $('#f-sec').onchange = async e => { f.section = e.target.value; await refetch(); };
+    const more = $('#more'); if (more) more.onclick = async () => { const next = await call('campaigns.list', Object.assign({ offset }, f)); rows = rows.concat(next); offset += next.length; if (!next.length) toast('No more campaigns'); draw(); };
+    $$('[data-seen]').forEach(() => {});
+  }
+  async function refetch() { rows = await call('campaigns.list', f); offset = rows.length; draw(); }
+  draw();
+};
+views['campaigns/detail'] = id => campaignDetail(id);
+
+// ---------- campaigns: new ----------
+views['campaigns/new'] = async function (preselected) {
+  const [groups, templates, info] = await Promise.all([call('parents.groups'), call('templates.list', 'approved'), call('info')]);
+  state.info = info;
+  if (!groups.length || !templates.length) {
+    main().innerHTML = '<div class="head"><h1>New campaign</h1></div><div class="card empty">' +
+      (!groups.length ? 'No parents yet. <a href="#" data-go="parents">Upload parents</a> first.' : 'No approved template yet. <a href="#" data-go="templates/new">Request a template</a> and wait for Meta to approve it.') + '</div>';
+    return;
+  }
+  // insts: picked schools. lvls / secs: picked grades and sections; none picked = all of them.
+  // types: picked types of beneficiary; none picked = every type. Types alone are enough (they go to every school).
+  const s = { name: '', insts: [], lvls: [], secs: [], types: [], tpl: preselected && templates.some(t => t.id === preselected) ? preselected : '', q: '', values: {} };
+  const insts = tally(groups, g => g.institution, g => g.parent_count);
+  const types = tally(groups, g => g.beneficiary_type, g => g.parent_count);
+
+  function templateHits() {
+    const q = s.q.trim().toLowerCase();
+    const hits = templates.filter(t => !q || (t.name + ' ' + t.language + ' ' + t.body).toLowerCase().indexOf(q) >= 0);
+    if (!hits.length) return '<li class="none">No approved template matches \u201c' + esc(s.q) + '\u201d.</li>';
+    return hits.slice(0, 20).map(t => '<li tabindex="0" data-tpl="' + t.id + '">' + esc(t.name) + '<small>' + esc(t.language) + '</small></li>').join('') +
+      (hits.length > 20 ? '<li class="none">' + (hits.length - 20) + ' more. Type more of the name to narrow it down.</li>' : '');
+  }
+  const K = (...parts) => parts.join('\u0001'), has = (list, k) => list.indexOf(k) >= 0;
+  const toggle = (list, k) => has(list, k) ? list.filter(x => x !== k) : list.concat([k]);
+  // Class and section choices for the picked schools (and classes), with parent counts.
+  function levelChoices() {
+    return s.insts.flatMap(i => tally(groups.filter(g => g.institution === i), g => g.class_or_year, g => g.parent_count)
+      .map(l => ({ key: K(i, l.value), inst: i, cy: l.value, count: l.count })));
+  }
+  function sectionChoices() {
+    return levelChoices().filter(l => has(s.lvls, l.key)).flatMap(l => tally(groups.filter(g => g.institution === l.inst && g.class_or_year === l.cy), g => g.section, g => g.parent_count)
+      .map(x => ({ key: K(l.inst, l.cy, x.value), inst: l.inst, cy: l.cy, sec: x.value, count: x.count })));
+  }
+  // What the server gets: per school, its picked classes (or the whole school); per class, its picked sections (or all).
+  function pickedGroups() {
+    const out = [];
+    s.insts.forEach(i => {
+      const lv = levelChoices().filter(l => l.inst === i && has(s.lvls, l.key));
+      if (!lv.length) return out.push({ institution: i, class_or_year: null, section: null });
+      lv.forEach(l => {
+        const sc = sectionChoices().filter(x => x.inst === i && x.cy === l.cy && has(s.secs, x.key));
+        if (!sc.length) out.push({ institution: i, class_or_year: l.cy, section: null });
+        else sc.forEach(x => out.push({ institution: i, class_or_year: l.cy, section: x.sec }));
+      });
+    });
+    return out;
+  }
+  function audienceGroups() {
+    const picked = pickedGroups();
+    if (!picked.length && !s.types.length) return [];
+    return groups.filter(g => (!picked.length || picked.some(p => g.institution === p.institution && (!p.class_or_year || g.class_or_year === p.class_or_year) && (!p.section || g.section === p.section))) &&
+      (!s.types.length || s.types.indexOf(g.beneficiary_type) >= 0));
+  }
+  function chip(attr, i, text, on) { return '<span class="chip' + (on ? ' on' : '') + '" ' + attr + '="' + i + '" aria-pressed="' + on + '">' + esc(text) + '</span>'; }
+  function draw() {
+    const levels = levelChoices(), secs = sectionChoices(), several = s.insts.length > 1;
+    const tpl = templates.find(t => t.id === s.tpl);
+    const chosen = s.insts.length || s.types.length, ag = audienceGroups();
+    const parents = ag.reduce((n, g) => n + g.parent_count, 0);
+    let body = '';
+    if (tpl) { body = tpl.body; placeholders(tpl.body).forEach(n => { body = body.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); }
+    const est = info.cost_per_whatsapp && parents ? 'Estimate: ' + money(parents * info.cost_per_whatsapp, info.currency) + ' (rough)' : '';
+    main().innerHTML = '<div class="head"><div><h1>New campaign</h1><p class="sub" style="margin:0">Pick who gets it, which template, and fill in the values.</p></div></div>' +
+      '<div class="card"><label for="c-name" style="margin-top:0">Campaign name (optional)' + tip('Only staff see this name, in the campaign list and exports. Parents never see it.') + '</label><input id="c-name" maxlength="100" placeholder="e.g. PTM reminder, November" value="' + esc(s.name) + '"></div>' +
+      '<div class="card"><h2>1. Audience</h2>' +
+      '<p class="muted small" style="margin:0">Pick schools, types of beneficiary, or both. Picking only types sends to those children in every school.</p>' +
+      '<label>Schools' + tip('Tick one or more. Every child in a ticked school gets the message, unless you pick grades below.') + '</label><div class="chips" style="margin-top:4px">' + chip('data-all-inst', 1, 'All', s.insts.length === insts.length) +
+        insts.map((i, n) => chip('data-inst', n, i.value + ' (' + i.count + ')', has(s.insts, i.value))).join('') + '</div>' +
+      (levels.length ? '<label>Grades' + tip('Leave on All grades to send to every grade in the ticked schools.') + '</label><div class="chips" style="margin-top:4px">' + chip('data-all-lvl', 1, 'All grades', !s.lvls.length) +
+        levels.map((l, n) => chip('data-lvl', n, (several ? l.inst + ' \u00b7 ' : '') + l.cy + ' (' + l.count + ')', has(s.lvls, l.key))).join('') + '</div>' : '') +
+      (secs.length ? '<label>Sections / streams' + tip('A grade with no section ticked goes to all its sections.') + '</label><div class="chips" style="margin-top:4px">' + chip('data-all-sec', 1, 'All sections', !s.secs.length) +
+        secs.map((x, n) => chip('data-sec', n, (several ? x.inst + ' \u00b7 ' : '') + x.cy + ' \u00b7 ' + x.sec + ' (' + x.count + ')', has(s.secs, x.key))).join('') + '</div>' +
+        '<p class="muted small" style="margin:0">A grade with no section ticked goes to all its sections.</p>' : '') +
+      '<label>Types of beneficiary' + tip('Tick one or more to send only to children of those types. Leave on All types to ignore the type.') + '</label><div class="chips" style="margin-top:4px">' + chip('data-all-type', 1, 'All types', !s.types.length) +
+        types.map((t, n) => chip('data-type', n, t.value + ' (' + t.count + ')', has(s.types, t.value))).join('') + '</div>' +
+      (chosen ? '<p class="muted small" style="margin:10px 0 0">' + parents + (parents === 1 ? ' child' : ' children') + (s.insts.length ? '' : ' in all schools') + '. Each child is one message, so a parent with two children here gets two. Children marked Discontinued are skipped.</p>' : '') + '</div>' +
+      '<div class="card"><h2>2. Template' + tip('Only templates WhatsApp has approved can be sent. Search by name or by words in the message.') + '</h2>' +
+      (tpl ? '<div class="row"><div><b>' + esc(tpl.name) + '</b> <span class="muted small">' + esc(tpl.language) + '</span></div><button class="btn small" id="t-change">Change</button></div>'
+        : '<input id="t-q" type="search" autocomplete="off" placeholder="Search ' + templates.length + ' approved templates by name or text\u2026" value="' + esc(s.q) + '"><ul class="tpl-hits" id="t-hits">' + templateHits() + '</ul>') +
+      '<p class="muted small">Everyone gets this template, in its language.</p>' +
+      (tpl ? '<div class="grid2">' + placeholders(tpl.body).map(n => {
+        const name = (tpl.variable_names || [])[n - 1] || '', label = '<label>{{' + n + '}} ' + esc(name) + '</label>';
+        // A blank labelled "time" gets a time picker, so every campaign uses the same format (10:00 AM).
+        if (/time/i.test(name)) return '<div>' + label + '<input type="time" data-var="' + n + '" data-time="1" value="' + esc(to24h(s.values[n])) + '"></div>';
+        return '<div>' + label + '<input data-var="' + n + '" value="' + esc(s.values[n] || '') + '" placeholder="' + esc((tpl.sample_values || {})[n] || '') + '"></div>';
+      }).join('') + '</div>' +
+        '<label>Preview</label><div class="wa">' + esc(body) + (tpl.has_confirm_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div>' : '') + '</div>' +
+      '<div id="err"></div>' +
+      '<div class="row"><div>' + (est ? '<span class="muted small">' + esc(est) + '</span>' : '') + '</div><button class="btn primary" id="send" data-tip="' + (ag.length && tpl ? 'You will see how many messages go out before anything is sent' : 'Pick a school or a type of beneficiary, and a template, first') + '" ' + (ag.length && tpl ? '' : 'disabled') + '>Send campaign</button></div>';
+    // Unticking a school or class also drops the classes and sections picked inside it.
+    const tidy = () => { s.lvls = s.lvls.filter(k => levelChoices().some(l => l.key === k)); s.secs = s.secs.filter(k => sectionChoices().some(x => x.key === k)); };
+    $('#c-name').oninput = e => { s.name = e.target.value; };
+    $$('[data-all-inst]').forEach(c => c.onclick = () => { s.insts = s.insts.length === insts.length ? [] : insts.map(i => i.value); tidy(); draw(); });
+    $$('[data-inst]').forEach(c => c.onclick = () => { s.insts = toggle(s.insts, insts[c.dataset.inst].value); tidy(); draw(); });
+    $$('[data-all-lvl]').forEach(c => c.onclick = () => { s.lvls = []; s.secs = []; draw(); });
+    $$('[data-lvl]').forEach(c => c.onclick = () => { s.lvls = toggle(s.lvls, levels[c.dataset.lvl].key); tidy(); draw(); });
+    $$('[data-all-sec]').forEach(c => c.onclick = () => { s.secs = []; draw(); });
+    $$('[data-sec]').forEach(c => c.onclick = () => { s.secs = toggle(s.secs, secs[c.dataset.sec].key); draw(); });
+    $$('[data-all-type]').forEach(c => c.onclick = () => { s.types = []; draw(); });
+    $$('[data-type]').forEach(c => c.onclick = () => { s.types = toggle(s.types, types[c.dataset.type].value); draw(); });
+    if ($('#t-q')) {
+      const pick = li => { if (li && li.dataset.tpl) { s.tpl = li.dataset.tpl; s.values = {}; draw(); } };
+      $('#t-q').oninput = e => { s.q = e.target.value; $('#t-hits').innerHTML = templateHits(); };
+      $('#t-hits').onclick = e => pick(e.target.closest('li'));
+      $('#t-hits').onkeydown = e => { if (e.key === 'Enter') pick(e.target.closest('li')); };
+    }
+    if ($('#t-change')) $('#t-change').onclick = () => { s.tpl = ''; s.values = {}; draw(); $('#t-q').focus(); };
+    $$('[data-var]').forEach(i => i.oninput = () => { s.values[i.dataset.var] = i.dataset.time ? to12h(i.value) : i.value; const t2 = templates.find(t => t.id === s.tpl); let b = t2.body; placeholders(b).forEach(n => { b = b.split('{{' + n + '}}').join(s.values[n] || '{{' + n + '}}'); }); $('.wa').firstChild.textContent = b; });
+    $('#send').onclick = confirmSend;
+  }
+  function confirmSend() {
+    const tpl = templates.find(t => t.id === s.tpl), ag = audienceGroups();
+    const parents = ag.reduce((n, g) => n + g.parent_count, 0);
+    const m = modal('<h2>Send ' + parents + (parents === 1 ? ' message' : ' messages') + ' (one per child)?</h2><p>This sends ' + (s.name.trim() ? '<b>' + esc(s.name.trim()) + '</b> using ' : '') + '<b>' + esc(tpl.name) + '</b> now. It can\u2019t be undone, though you can stop a campaign that is still sending.</p><div class="actions"><button class="btn" id="no">Cancel</button><button class="btn primary" id="yes">Send</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async () => {
+      m.close();
+      try {
+        const r = await call('campaigns.create', { name: s.name.trim(), template_id: s.tpl, groups: pickedGroups(), beneficiary_types: s.types, variables: s.values });
+        await driveSend(r.id, r.message_count);
+        go('campaigns/detail', r.id);
+      } catch (e) { $('#err').innerHTML = errorsHtml(e); }
+    };
+  }
+  draw();
+};
+
+// Time picker value "14:05" <-> message text "2:05 PM".
+function to12h(v) {
+  const m = /^(\d{2}):(\d{2})/.exec(v || '');
+  if (!m) return '';
+  const h = Number(m[1]);
+  return (h % 12 || 12) + ':' + m[2] + ' ' + (h < 12 ? 'AM' : 'PM');
+}
+function to24h(v) {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(v || '');
+  if (!m) return '';
+  const h = Number(m[1]) % 12 + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return ('0' + h).slice(-2) + ':' + m[2];
+}
+
+// Apps Script has no background jobs: the page keeps asking the server to send the next batch.
+async function driveSend(id, total) {
+  const m = modal('<div class="busy-modal">' + stringSvg('md') + '<h2>Sending\u2026</h2><p id="p" class="muted" style="margin:0">Starting\u2026</p><div class="meter"><i id="mt"></i></div><p class="small muted" style="margin:0">Keep this tab open. If you close it, the background job finishes the rest within about 5\u201310 minutes.</p></div>');
+  m.dataset.noesc = '1';
+  try {
+    for (let tries = 0; ;) {
+      let r;
+      try { r = await call('campaigns.sendBatch', id); tries = 0; }
+      catch (e) {
+        // No status = not a clear "no" from the server (e.g. busy lock, network): wait and try again, up to 3 times.
+        if (e.status || ++tries > 3) throw e;
+        $('#p', m).textContent = 'The server is busy, trying again\u2026';
+        await new Promise(res => setTimeout(res, 5000));
+        continue;
+      }
+      $('#p', m).textContent = r.remaining ? r.remaining + (total ? ' of ' + total : '') + ' still to send\u2026' : 'Done.';
+      if (total) $('#mt', m).style.width = Math.round((total - r.remaining) / total * 100) + '%';
+      if (!r.remaining || r.status === 'cancelled') break;
+    }
+    await showDone(m, total ? 'Sent ' + total + (total === 1 ? ' message' : ' messages') : 'Sent', 'Delivery and replies will appear on the campaign page.');
+  } finally { m.close(); }
+}
+
+// ---------- campaigns: detail ----------
+async function campaignDetail(id, statusFilter) {
+  const c = await call('campaigns.get', id, statusFilter || null);
+  const active = statusFilter ? GROUPS.find(g => g.statuses.indexOf(statusFilter) >= 0) : null;
+  let group = (window.__grp && window.__grp.id === id) ? window.__grp.key : '';
+  let msgs = c.messages;
+  if (group) { const g = GROUPS.find(x => x.key === group); msgs = msgs.filter(m => g.statuses.indexOf(m.status) >= 0); }
+  window.__grp = { id, key: group };
+  const live = c.status === 'sending' || (c.counts.queued + c.counts.sent + c.counts.delivered + c.counts.read) > 0;
+  main().innerHTML = noticesHtml() +
+    '<p><a href="#" data-go="campaigns">\u2190 Campaigns</a></p>' +
+    '<div class="head"><div><h1>' + esc(c.name || c.audience) + '</h1><p class="sub" style="margin:0">' + (c.name ? esc(c.audience) + ' \u00b7 ' : '') + esc(c.template_name) + ' \u00b7 ' + esc(fmtDate(c.created_at)) + ' \u00b7 by ' + esc(c.sender || '') + ' \u00b7 ' + badge(c.status) + '</p></div>' +
+    '<div class="row" style="flex:0 0 auto">' +
+    (c.status === 'sending' || c.status === 'failed' ? '<button class="btn primary" id="cont" data-tip="Send to the parents who have not been messaged yet">Continue sending</button>' : '') +
+    (c.counts.failed ? '<button class="btn" id="retry" data-tip="Try again for parents whose WhatsApp message failed">Retry failed (' + c.counts.failed + ')</button>' : '') +
+    (c.status !== 'sending' ? '<button class="btn danger" id="del" data-tip="Delete this campaign and its results from the app. A Drive export, if any, is kept.">Delete</button>' : '') +
+    (c.status !== 'cancelled' ? '<button class="btn danger" id="stop" data-tip="Stop messages that have not gone out yet. Messages already sent stay sent.">Stop campaign</button>' : '') +
+    '<button class="btn" id="export" data-tip="Save this campaign\u2019s results as a Google Sheet in Drive">' + (c.archive_url ? 'Update Drive export' : 'Export to Drive') + '</button>' +
+    (live ? '<span class="live"><i></i>Updating every 10 s</span>' : '') + '<button class="btn" id="refresh" data-tip="Load the latest statuses now">Refresh</button></div></div>' +
+    (c.archive_url ? '<div class="alert ok">Archived to Google Drive on ' + esc(fmtDate(c.archived_at)) + ': <a href="' + esc(c.archive_url) + '" target="_blank" rel="noopener">open the sheet</a></div>' : '') +
+    '<div class="card">' + progressBar(c.counts) + '<div class="chips"><span class="chip ' + (group ? '' : 'on') + '" data-g="">All (' + c.counts.total + ')</span>' +
+    GROUPS.map(g => { const n = gcount(c.counts, g.statuses); return n ? '<span class="chip ' + (group === g.key ? 'on' : '') + '" data-g="' + g.key + '">' + g.label + ' (' + n + ')</span>' : ''; }).join('') + '</div>' +
+    '<div class="wa" style="margin-top:6px">' + esc(templateText(c)) + (c.template_has_buttons ? '<div class="btns"><span>Confirm</span><span>Can\u2019t attend</span></div>' : '') + '</div></div>' +
+    '<div class="card scroll">' + (msgs.length ? '<table><thead><tr><th>Parent</th><th>Student</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
+      msgs.map(m => '<tr class="click" data-m="' + m.id + '"><td>' + esc(m.parents.parent_name) + '</td><td>' + esc(m.parents.child_name || '') + '</td><td>' + esc(m.parents.phone_e164) + '</td><td>' + badge(m.status) + '<div class="small muted" title="' + esc(fmtDate(m.status_at || m.updated_at)) + '">' + esc(statusTime(m.status_at || m.updated_at)) + '</div></td><td class="small muted">' + esc(messageDetails(m)) + (m.reply_text ? '<br>\u201c' + esc(m.reply_text) + '\u201d' : '') + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="empty">No parents in this view.</div>') + '</div>';
+
+  const reload = () => { loading(); return campaignDetail(id); };
+  $$('[data-g]').forEach(ch => ch.onclick = () => { window.__grp = { id, key: ch.dataset.g }; reload(); });
+  $('#refresh').onclick = reload;
+  clearInterval(state.refresh);
+  if (live) state.refresh = setInterval(() => {   // quiet auto-refresh: only when the tab is visible, no window is open and you are at the top
+    if (document.hidden || $('.overlay') || window.scrollY > 80 || state.view !== 'campaigns/detail') return;
+    campaignDetail(id, statusFilter).then(settleView).catch(() => {});
+  }, 10000);
+  $('#export').onclick = async e => {
+    e.target.disabled = true; e.target.textContent = 'Exporting\u2026';
+    try { const r = await call('campaigns.export', id); toast('Saved to Drive: ' + r.name); reload(); } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Export to Drive'; }
+  };
+  if ($('#cont')) $('#cont').onclick = async () => { try { await driveSend(id); } catch (e) { toast(e.message, true); } reload(); };
+  if ($('#retry')) $('#retry').onclick = async () => {
+    try { const r = await call('campaigns.retryFailed', id); toast(r.retried + ' messages queued again'); await driveSend(id); } catch (e) { toast(e.message, true); } reload();
+  };
+  if ($('#stop')) $('#stop').onclick = () => {
+    const m = modal('<h2>Stop this campaign?</h2><p>Unsent messages are cancelled and no more fallback calls are placed. Messages already delivered stay, and parents can still reply.</p><div class="actions"><button class="btn" id="no">Keep going</button><button class="btn danger" id="yes">Stop campaign</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async () => { m.close(); try { const r = await call('campaigns.cancel', id); toast(r.stopped + ' messages cancelled'); } catch (e) { toast(e.message, true); } reload(); };
+  };
+  if ($('#del')) $('#del').onclick = () => {
+    const m = modal('<h2>Delete this campaign?</h2><p>Its results are removed from the app: every parent\u2019s status, reply and call for this campaign. ' + (c.archive_url ? 'The Drive export is kept. ' : '') + 'This can\u2019t be undone.</p><div id="derr"></div><div class="actions"><button class="btn" id="no">Cancel</button><button class="btn danger" id="yes">Delete campaign</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async e => {
+      e.target.disabled = true;
+      try { await call('campaigns.delete', id); m.close(); clearInterval(state.refresh); toast('Campaign deleted'); go('campaigns'); }
+      catch (err) { $('#derr', m).innerHTML = errorsHtml(err); e.target.disabled = false; }
+    };
+  };
+  $$('[data-m]').forEach(tr => tr.onclick = () => messagePanel(c, c.messages.find(m => m.id === tr.dataset.m), reload));
+}
+function templateText(c) {
+  let b = c.template_body || '';
+  Object.keys(c.variables || {}).forEach(k => { b = b.split('{{' + k + '}}').join(c.variables[k]); });
+  return b;
+}
+function messageDetails(m) {
+  if (m.status === 'confirmed' || m.status === 'declined') return m.confirmed_via === 'admin' ? 'Recorded by an admin' : m.confirmed_via === 'voice' ? 'Answered on the phone call' : 'Answered on WhatsApp';
+  if (m.status === 'cancelled') return m.parents.deleted ? 'Parent deleted before sending' : /^discontinued$/i.test(String(m.parents.beneficiary_status || '').trim()) ? 'Child marked Discontinued' : 'Campaign stopped before sending';
+  if (m.call_status) return 'Call: ' + m.call_status.replace('-', ' ');
+  if (m.call_requested_at) return 'Calling now';
+  if (m.call_due_at) return (m.wa_error ? m.wa_error + ' ' : '') + 'Call ' + callTime(m.call_due_at);
+  if (m.wa_error) return m.wa_error;
+  if (m.status === 'read') return 'Read, no reply yet';
+  return '';
+}
+function eventSummary(e) {
+  const p = e.payload || {};
+  switch (e.source) {
+    case 'whatsapp_status': return 'WhatsApp: ' + (p.MessageStatus || '?') + (p.ErrorCode ? ' (error ' + p.ErrorCode + ')' : '');
+    case 'whatsapp_inbound': return (p.ButtonPayload ? 'Tapped' : 'Replied') + ' \u201c' + (p.Body || '') + '\u201d' + (p.recovered ? ' (recovered)' : '');
+    case 'voice_gather': return 'Pressed ' + (p.Digits || 'nothing');
+    case 'voice_status': return 'Call ' + (p.CallStatus || '?') + (p.CallDuration ? ', ' + p.CallDuration + ' s' : '');
+    case 'admin': return 'Marked ' + p.outcome + ' by ' + p.by;
+    case 'cron': return p.error ? 'Error: ' + p.error : p.recheck_status ? 'Status re-checked with Twilio: ' + p.recheck_status : 'Background job';
+    default: return e.source;
+  }
+}
+async function messagePanel(c, m, reload) {
+  const o = modal('<h2>' + esc(m.parents.parent_name) + '</h2><p class="muted">' + esc(m.parents.child_name ? 'Parent of ' + m.parents.child_name + ' \u00b7 ' : '') + esc(m.parents.phone_e164) + (m.parents.beneficiary_type ? ' \u00b7 ' + esc(m.parents.beneficiary_type) : '') + '</p>' +
+    '<p>' + badge(m.status) + ' <span class="muted small">since ' + esc(statusTime(m.status_at || m.updated_at)) + (messageDetails(m) ? ' \u00b7 ' + esc(messageDetails(m)) : '') + '</span></p>' +
+    (m.reply_text ? '<p><b>Reply:</b> \u201c' + esc(m.reply_text) + '\u201d <span class="muted small">' + esc(timeAgo(m.replied_at)) + '</span></p>' : '') +
+    (m.status !== 'cancelled' ? '<div class="row" style="flex:0 0 auto"><button class="btn" data-r="confirmed">Mark confirmed</button><button class="btn" data-r="declined">Mark declined</button></div><p class="small muted">Use after speaking to the parent personally.</p>' : '') +
+    '<h2 style="margin-top:14px">Timeline</h2><ul class="tl" id="tl"><li class="muted">Loading\u2026</li></ul><div class="actions"><button class="btn" id="x">Close</button></div>');
+  $('#x', o).onclick = o.close;
+  $$('[data-r]', o).forEach(b => b.onclick = async () => { try { await call('messages.resolve', m.id, b.dataset.r); toast('Saved'); o.close(); reload(); } catch (e) { toast(e.message, true); } });
+  try {
+    const ev = await call('messages.events', m.id);
+    $('#tl', o).innerHTML = ev.length ? ev.map(e => '<li><span class="muted small">' + esc(fmtDate(e.created_at)) + '</span> \u2014 ' + esc(eventSummary(e)) + '</li>').join('') : '<li class="muted">No events yet.</li>';
+  } catch (e) { $('#tl', o).innerHTML = '<li>' + esc(e.message) + '</li>'; }
+}
+
+// ---------- parents ----------
+// Ek Tara's columns. All are required; the headers may differ in case, spaces and punctuation.
+const SAMPLE_CSV = 'File Number,New Child ID,Father/Mother,Phone(Mobile),Name,School Name,Type of Beneficiary,Status of Beneficiary,Current Grade,Current Section/Stream\n' +
+  'F-101,C0001,Asha Rao,98765 43210,Riya Rao,Sunrise Public School,Scholarship,Active,7,B\n' +
+  'F-101,C0002,Asha Rao,98765 43210,Aman Rao,Sunrise Public School,Scholarship,Active,4,A\n' +
+  'F-102,C0003,Meera Iyer,98400 12345,Karthik Iyer,City Junior College,Mentorship,Active,12,Science\n';
+const REPLIES_HELP = 'Replies: how many messages about this child were answered (on WhatsApp, on the phone call, or recorded by staff), out of how many were sent. Red means someone should follow up personally.';
+const PHONE_HELP = 'Phone(Mobile): a 10-digit Indian number that does not start with 0 or 1 (a 0, 91 or +91 in front is fine). ' +
+  'Foreign numbers need + and the country code, e.g. +44 7911 123456; without the +, a foreign number is rejected or read as an Indian one. ' +
+  'A number that is not on WhatsApp is accepted here but its message shows as Failed when sent.';
+const isDiscontinued = p => String(p.beneficiary_status || '').trim().toLowerCase() === 'discontinued';
+
+function repliesHtml(s) {
+  if (!s.total) return '<span class="muted">No messages yet</span>';
+  return s.responded + ' of ' + s.total + ' answered' + (s.flagged ? ' <span class="badge b-flagged">' + s.flagged + ' to follow up</span>' : '');
+}
+
+// The BOM makes Excel read the file as UTF-8.
+function sampleCsvHref() { return 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + SAMPLE_CSV); }
+
+/** One line per CSV row: Added, Updated or Rejected (with the reason). */
+function uploadResultHtml(r) {
+  const STATUS = { added: ['confirmed', 'Added'], updated: ['sent', 'Updated'], rejected: ['failed', 'Rejected'] };
+  const lines = (r.rows || []).map(x => ({ row: x.row, name: x.parent_name, phone: x.phone, status: x.status, reason: '' }))
+    .concat((r.errors || []).map(e => ({ row: e.row, name: e.parent_name || '', phone: e.phone || '', status: 'rejected', reason: e.reason })))
+    .sort((a, b) => a.row - b.row);
+  return '<div class="card"><b>Latest upload: ' + r.inserted + ' added, ' + r.updated + ' updated, ' + r.rejected + ' rejected.</b>' +
+    (lines.length ? '<div class="scroll"><table><thead><tr><th>CSV row</th><th>Parent</th><th>Phone</th><th>Status</th><th>Reason</th></tr></thead><tbody>' +
+      lines.map(x => '<tr><td>' + x.row + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.phone) + '</td><td><span class="badge b-' + STATUS[x.status][0] + '">' + STATUS[x.status][1] + '</span></td><td class="small muted">' + esc(x.reason) + '</td></tr>').join('') +
+      '</tbody></table></div>' : '') + '</div>';
+}
+
+views.parents = async function () {
+  const all = await call('parents.list', {});
+  const f = { institution: '', class_or_year: '', section: '', type: '', hard: false, q: '' };
+  let result = window.__uploadResult || null; window.__uploadResult = null;
+
+  function filtered() {
+    return all.filter(p => (!f.institution || p.institution === f.institution) && (!f.class_or_year || p.class_or_year === f.class_or_year) &&
+      (!f.section || p.section === f.section) && (!f.type || p.beneficiary_type === f.type) && (!f.hard || (p.stats.responded === 0 && p.stats.total >= 2)) &&
+      (!f.q || (p.parent_name + ' ' + (p.child_name || '') + ' ' + p.phone_e164 + ' ' + p.id + ' ' + (p.file_number || '')).toLowerCase().indexOf(f.q.toLowerCase()) >= 0));
+  }
+  function draw() {
+    const insts = tally(all, p => p.institution, () => 1);
+    const levels = f.institution ? tally(all.filter(p => p.institution === f.institution), p => p.class_or_year, () => 1) : [];
+    const secs = f.class_or_year ? tally(all.filter(p => p.institution === f.institution && p.class_or_year === f.class_or_year), p => p.section, () => 1) : [];
+    const types = tally(all, p => p.beneficiary_type, () => 1);
+    const rows = filtered();
+    main().innerHTML = noticesHtml() +
+      '<div class="head"><div><h1>Parent Info</h1><p class="sub" style="margin:0">' + all.length + (all.length === 1 ? ' child' : ' children') + ' saved. To add or change anyone, upload Ek Tara\u2019s CSV file: rows are matched on New Child ID, and nobody is deleted. The newest changes are shown first.</p></div>' +
+      '<div class="row" style="flex:0 0 auto"><button class="btn" id="sample" data-tip="Download an example file with the right columns">Sample CSV</button>' +
+      '<button class="btn primary" id="upload" data-tip="Add new children or update existing ones (matched by New Child ID)">Upload CSV</button><input type="file" id="file" accept=".csv,text/csv" style="display:none">' + tip(PHONE_HELP) + '</div></div>' +
+      (result ? uploadResultHtml(result) : '') +
+      '<div class="card"><div class="row">' +
+      '<div><label>Search</label><input id="q" value="' + esc(f.q) + '" placeholder="Name, phone, child ID or file number"></div>' +
+      '<div><label>School</label><select id="f-inst"><option value="">All</option>' + insts.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === f.institution)).join('') + '</select></div>' +
+      '<div><label>Grade</label><select id="f-lvl" ' + (f.institution ? '' : 'disabled') + '><option value="">All</option>' + levels.map(i => opt(i.value, i.value, i.value === f.class_or_year)).join('') + '</select></div>' +
+      '<div><label>Section / stream</label><select id="f-sec" ' + (f.class_or_year ? '' : 'disabled') + '><option value="">All</option>' + secs.map(i => opt(i.value, i.value, i.value === f.section)).join('') + '</select></div>' +
+      '<div><label>Type of beneficiary</label><select id="f-type"><option value="">All</option>' + types.map(i => opt(i.value, i.value + ' (' + i.count + ')', i.value === f.type)).join('') + '</select></div></div>' +
+      '<label class="inline"><input type="checkbox" id="hard" ' + (f.hard ? 'checked' : '') + '> Hard to reach: hasn’t answered any message (2 or more sent)</label></div>' +
+      '<div class="card scroll">' + (rows.length ? '<table><thead><tr><th>Parent</th><th>Child</th><th>Phone</th><th>Group</th><th>Type</th><th>Status</th><th title="' + esc(REPLIES_HELP) + '">Replies</th></tr></thead><tbody>' +
+        rows.map(p => '<tr class="click" data-p="' + esc(p.id) + '"><td>' + esc(p.parent_name) + '</td><td>' + esc(p.child_name || '') + '<div class="small muted">' + esc(p.id) + '</div></td><td>' + esc(p.phone_e164) + '</td>' +
+          '<td class="small">' + esc(p.institution) + ' \u00b7 Grade ' + esc(p.class_or_year) + (p.section ? ' ' + esc(p.section) : '') + '</td><td class="small">' + esc(p.beneficiary_type || '') + '</td>' +
+          '<td class="small">' + (isDiscontinued(p) ? '<span class="badge b-cancelled">' + esc(p.beneficiary_status) + '</span>' : esc(p.beneficiary_status || '')) + '</td>' +
+          '<td>' + repliesHtml(p.stats) + '</td></tr>').join('') + '</tbody></table>' +
+          '<p class="small muted">' + esc(REPLIES_HELP) + ' Children marked Discontinued get no messages.</p>'
+        : (all.length ? '<div class="empty">No children match these filters.</div>' : emptyState('users', 'No children yet', 'Upload Ek Tara\u2019s CSV file. Use Sample CSV to see the columns.', { label: 'Upload CSV', attr: 'data-click="#upload"' }))) + '</div>';
+    $('#q').oninput = e => { f.q = e.target.value; const pos = e.target.selectionStart; draw(); const q = $('#q'); q.focus(); q.setSelectionRange(pos, pos); };
+    $('#f-inst').onchange = e => { f.institution = e.target.value; f.class_or_year = ''; f.section = ''; draw(); };
+    $('#f-lvl').onchange = e => { f.class_or_year = e.target.value; f.section = ''; draw(); };
+    $('#f-sec').onchange = e => { f.section = e.target.value; draw(); };
+    $('#f-type').onchange = e => { f.type = e.target.value; draw(); };
+    $('#hard').onchange = e => { f.hard = e.target.checked; draw(); };
+    $('#sample').onclick = () => { const m = modal('<h2>Sample CSV</h2><p class="small muted">Download it and open it in Excel, or copy it into a file named parents.csv (UTF-8). Every column must be filled in on every row. New Child ID must be unique: a row with an ID that is already saved updates that child. Children with Status of Beneficiary = Discontinued get no messages.</p><p class="small muted">' + esc(PHONE_HELP) + '</p><pre id="csv">' + esc(SAMPLE_CSV) + '</pre><div class="actions"><a class="btn primary" id="dl" style="text-decoration:none;display:inline-block" download="parents.csv" href="' + sampleCsvHref() + '">Download (opens in Excel)</a><button class="btn" id="cp">Copy</button><button class="btn" id="x">Close</button></div>'); $('#x', m).onclick = m.close; $('#cp', m).onclick = () => { navigator.clipboard.writeText(SAMPLE_CSV).then(() => toast('Copied'), () => toast('Select and copy manually', true)); }; };
+    $('#upload').onclick = () => $('#file').click();
+    $('#file').onchange = e => {
+      const file = e.target.files[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = async () => {
+        try { window.__uploadResult = await call('parents.upload', String(r.result)); toast('Upload finished'); go('parents'); }
+        catch (err) { toast(err.message, true); }
+      };
+      r.readAsText(file, 'utf-8');
+    };
+    $$('[data-p]').forEach(tr => tr.onclick = () => parentDrawer(all.find(p => p.id === tr.dataset.p)));
+  }
+  draw();
+};
+
+/** Read-only details of one child, with the messages sent about them. Changes come only from the CSV upload. */
+function parentDrawer(p) {
+  const row = (label, v) => '<div><label>' + label + '</label><div>' + esc(v || '\u2014') + '</div></div>';
+  const m = modal('<h2>' + esc(p.child_name || '') + '</h2><div class="grid2">' +
+    row('New Child ID', p.id) + row('File number', p.file_number) + row('Parent', p.parent_name) + row('Phone', p.phone_e164) +
+    row('School', p.institution) + row('Grade', p.class_or_year) + row('Section / stream', p.section) +
+    row('Type of beneficiary', p.beneficiary_type) + row('Status of beneficiary', p.beneficiary_status) + '</div>' +
+    '<p class="small muted">To change these details, upload an updated CSV file.</p>' +
+    '<div class="actions"><button class="btn" id="x">Close</button></div>' +
+    '<h2 style="margin-top:14px">History</h2><ul class="tl" id="hist"><li class="muted">Loading\u2026</li></ul>');
+  $('#x', m).onclick = m.close;
+  call('parents.history', p.id).then(h => {
+    $('#hist', m).innerHTML = h.length ? h.map(x => '<li>' + badge(x.status) + ' ' + esc(x.campaigns.name || x.campaigns.templates.name || '') + ' \u00b7 ' + esc(x.campaigns.audience || '') + ' <span class="muted small">' + esc(timeAgo(x.updated_at)) + '</span>' + (x.reply_text ? '<br><span class="small muted">\u201c' + esc(x.reply_text) + '\u201d</span>' : '') + '</li>').join('') : '<li class="muted">No messages sent yet.</li>';
+  }).catch(e => { $('#hist', m).innerHTML = '<li>' + esc(e.message) + '</li>'; });
+}
+
+// ---------- templates ----------
+
+views.templates = async function () {
+  await loadNotices();
+  const list = await call('templates.list', null);
+  main().innerHTML = noticesHtml() +
+    '<div class="head"><div><h1>Templates</h1><p class="sub" style="margin:0">WhatsApp requires Meta-approved templates. Approval usually takes minutes to a day.</p></div>' +
+    '<div class="row" style="flex:0 0 auto"><button class="btn" id="imp" data-tip="Bring in templates that already exist in your Twilio account">Import from Twilio</button><button class="btn" id="sync" data-tip="Ask WhatsApp now whether waiting templates were approved">Check status now</button><button class="btn primary" data-go="templates/new" data-tip="Write a new message and send it to WhatsApp for approval">Request template</button></div></div>' +
+    (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Lang</th><th>Category</th><th>Status</th><th>Message</th><th></th></tr></thead><tbody>' +
+      list.map(t => '<tr><td><b>' + esc(t.name) + '</b></td><td>' + esc(t.language) + '</td><td class="small">' + esc(t.category) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
+        '<td class="small" style="max-width:340px">' + esc(t.body) + (t.has_confirm_buttons ? '<div class="muted">Buttons: Confirm / Can\u2019t attend</div>' : '') + '</td>' +
+        '<td style="white-space:nowrap">' + (t.status === 'approved' ? '<button class="btn small" data-use="' + t.id + '" title="Start a new campaign with this template">Use in campaign</button> ' : '') +
+        (t.status === 'draft' ? '<button class="btn small" data-retry="' + t.id + '" title="Sending to WhatsApp failed last time. Try again.">Retry submit</button>' : '') +
+        '<button class="btn small danger" data-del="' + t.id + '" title="Delete this template here and in Twilio. Past campaigns keep their results.">Delete</button></td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card">' + emptyState('file', 'No templates yet', 'WhatsApp needs an approved template for every message. Request one, or import the ones already in Twilio.', { label: 'Request template', attr: 'data-go="templates/new"' }) + '</div>');
+  $('#sync').onclick = async () => { try { const r = await call('templates.sync'); toast(syncSummary(r)); await views.templates(); } catch (e) { toast(e.message, true); } };
+  $('#imp').onclick = async e => {
+    e.target.disabled = true; e.target.textContent = 'Importing\u2026';
+    try {
+      const r = await call('templates.import');
+      const m = modal('<h2>Import from Twilio</h2><p><b>' + r.imported + ' imported</b> of ' + r.found + ' templates found.</p>' +
+        (r.imported ? '<p class="small muted">Placeholder labels are shown as \u201cvalue 1\u201d, \u201cvalue 2\u201d\u2026 The sample values come from Twilio.</p>' : '') +
+        (r.skipped.length ? '<div class="scroll"><table><thead><tr><th>Template</th><th>Note</th></tr></thead><tbody>' + r.skipped.map(s => '<tr><td>' + esc(s.name) + '</td><td class="small">' + esc(s.reason) + '</td></tr>').join('') + '</tbody></table></div>' : '') +
+        '<div class="actions"><button class="btn primary" id="x">Close</button></div>');
+      $('#x', m).onclick = () => { m.close(); views.templates(); };
+    } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Import from Twilio'; }
+  };
+  $$('[data-use]').forEach(b => b.onclick = () => go('campaigns/new', b.dataset.use));
+  $$('[data-retry]').forEach(b => b.onclick = async () => { try { await call('templates.retrySubmit', b.dataset.retry); toast('Submitted'); views.templates(); } catch (e) { toast(e.message, true); } });
+  $$('[data-del]').forEach(b => b.onclick = () => {
+    const t = list.find(x => x.id === b.dataset.del);
+    const m = modal('<h2>Delete ' + esc(t.name) + ' (' + esc(t.language) + ')?</h2><p>It is deleted here and in Twilio, so it can\u2019t be sent again. Past campaigns keep their results and still show its text. This can\u2019t be undone.</p><div id="derr"></div><div class="actions"><button class="btn" id="no">Cancel</button><button class="btn danger" id="yes">Delete template</button></div>');
+    $('#no', m).onclick = m.close;
+    $('#yes', m).onclick = async e => {
+      e.target.disabled = true;
+      try { await call('templates.delete', t.id); m.close(); toast('Template deleted'); views.templates(); }
+      catch (err) { $('#derr', m).innerHTML = errorsHtml(err); e.target.disabled = false; }
+    };
+  });
+};
+
+views['templates/new'] = async function () {
+  const s = { name: '', language: 'en', body: 'Dear parent, the PTM is on {{1}} at {{2}} in {{3}}. Please confirm your attendance.', buttons: true, names: ['date', 'time', 'venue'], samples: { 1: '12 Nov', 2: '10 AM', 3: 'Hall A' } };
+  function vars() {
+    const ph = placeholders(s.body);
+    $('#vars').innerHTML = ph.length ? '<label>Placeholders</label>' + ph.map(n => '<div class="row" style="margin-bottom:6px"><input data-n="' + n + '" value="' + esc(s.names[n - 1] || '') + '" placeholder="Label for {{' + n + '}}, e.g. date"><input data-s="' + n + '" value="' + esc(s.samples[n] || '') + '" placeholder="Sample value for {{' + n + '}}"></div>').join('') : '';
+    $$('[data-n]').forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; });
+    $$('[data-s]').forEach(i => i.oninput = () => { s.samples[i.dataset.s] = i.value; });
+  }
+  main().innerHTML = '<p><a href="#" data-go="templates">\u2190 Templates</a></p><div class="head"><h1>Request template</h1></div>' +
+    '<div class="card"><div class="grid2"><div><label>Name (lowercase, digits, underscores)' + tip('Used to find the template later, e.g. ptm_reminder. It can\u2019t be changed after submitting.') + '</label><input id="t-name" value="' + esc(s.name) + '" placeholder="ptm_reminder"></div>' +
+    '<div><label>Language' + tip('The language of this message. A campaign sends it as it is to everyone.') + '</label>' + languageSelect('t-lang', s.language) + '</div></div>' +
+    '<label>Message body</label><textarea id="t-body">' + esc(s.body) + '</textarea>' +
+    '<p class="small muted">Use {{1}}, {{2}} \u2026 for values. Don\u2019t start or end with a placeholder or put two next to each other. Max 1024 characters.</p><div id="vars"></div>' +
+    '<label class="inline"><input type="checkbox" id="t-btn" ' + (s.buttons ? 'checked' : '') + '> Add Confirm / Can\u2019t attend buttons' + tip('Parents can answer with one tap, and their answer is recorded automatically.') + '</label></div><div id="err"></div>' +
+    '<div class="row"><div></div><button class="btn primary" id="submit" data-tip="Sends it to WhatsApp (Meta) for approval. This usually takes minutes to a day.">Submit to WhatsApp</button></div>';
+  vars();
+  $('#t-body').oninput = e => { s.body = e.target.value; vars(); };
+  $('#t-btn').onchange = e => { s.buttons = e.target.checked; };
+  $('#submit').onclick = async e => {
+    e.target.disabled = true;
+    const ph = placeholders(s.body);
+    const body = { name: $('#t-name').value.trim(), language: $('#t-lang').value.trim(), body: s.body,
+      variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}), has_confirm_buttons: s.buttons };
+    try {
+      await call('templates.create', body);
+      toast('Submitted. Status: pending Meta'); go('templates');
+    } catch (err) { $('#err').innerHTML = errorsListHtml(err); e.target.disabled = false; }
+  };
+};
+
+</script>
