@@ -11,21 +11,15 @@ var BUILD_Admin = '20261107-1230'; // build stamp (see Build.gs)
  *
  * Roles
  *   Master        the project owner (permanent: cannot be removed or locked out) and any masters the owner appoints.
- *                 Can do everything below. Only the owner appoints or removes masters.
- *   Administrator manages only what a master gave it: Parent users, Donor users, and/or seeing the access log.
- *                 An administrator can only manage ordinary staff, never other administrators or masters.
+ *                 Can do everything: manage users, see the access log, check and fix file sharing, and access all divisions.
  *   Staff         works in the departments they were given.
  * Every person can also have an end date, after which their access stops by itself.
- * Saving a person also changes who is shared on the three Google Sheets, so the file-level separation stays true.
  */
 var PEOPLE_FILES = ['access', 'parent', 'donor'];
 var FILE_LABELS = { access: 'Access file', parent: 'Parent database', donor: 'Donor database' };
 
 function requireAdmin_(user) {
-  if (!isAdminUser_(user)) throw new ApiError('Only administrators can do this.', null, 403);
-}
-function requireCap_(user, cap) {
-  if (!user || (user.role !== 'master' && user.caps.indexOf(cap) < 0)) throw new ApiError('Your administrator role does not include this.', null, 403);
+  if (!user || (user.role !== 'master')) throw new ApiError('Only masters can do this.', null, 403);
 }
 function requireMaster_(user) {
   if (!user || user.role !== 'master') throw new ApiError('Only a master administrator can do this.', null, 403);
@@ -37,7 +31,6 @@ function publicUser_(r) {
   var email = String(r.email).toLowerCase(), owner = email === ownerEmail_(), role = owner ? 'master' : roleOf_(r.role);
   var legacy = !owner && r.parent_access === null && r.donor_access === null && r.org_overview === null;
   return { email: email, full_name: r.full_name || '', active: owner || !!r.active, role: role, owner: owner,
-    caps: role === 'master' ? Object.keys(ADMIN_CAPS) : role === 'admin' ? parseCaps_(r.admin_caps) : [],
     parent_access: owner || role === 'master' || legacy || flag_(r.parent_access), donor_access: owner || role === 'master' || flag_(r.donor_access), org_overview: owner || role === 'master' || flag_(r.org_overview),
     expires_on: r.expires_on || null, expired: !owner && !!(r.expires_on && todayStr_() > r.expires_on) };
 }
@@ -45,7 +38,7 @@ function publicUser_(r) {
 function listUsers_(actor) {
   requireAdmin_(actor);
   var rows = loadTable_('Admins').filter(function (r) { return r.email; }).map(publicUser_), owner = ownerEmail_();
-  if (owner && !rows.some(function (u) { return u.email === owner; })) rows.push(publicUser_({ email: owner, full_name: '', active: true }));   // the owner always appears
+  if (owner && !rows.some(function (u) { return u.email === owner; })) rows.push(publicUser_({ email: owner, full_name: '', active: true }));
   return rows.sort(function (a, b) { return Number(b.owner) - Number(a.owner) || Number(b.active) - Number(a.active) || a.email.localeCompare(b.email); });
 }
 
@@ -54,7 +47,7 @@ function logAccess_(by, action, email, details) {
 }
 
 function listAccessLog_(actor) {
-  requireCap_(actor, 'audit');
+  requireAdmin_(actor);
   return loadTable_('AccessLog').sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); }).slice(0, 40)
     .map(function (r) { return { at: r.at, by: r.by, action: r.action, email: r.email, details: r.details }; });
 }
@@ -62,8 +55,7 @@ function listAccessLog_(actor) {
 function describeAccess_(u) {
   if (!u) return 'none';
   var d = [u.parent_access ? 'parent' : '', u.donor_access ? 'donor' : '', u.org_overview ? 'overview' : ''].filter(Boolean).join(', ') || 'no division';
-  var caps = u.role === 'admin' ? ', can manage: ' + (u.caps.join(', ') || 'nothing') : '';
-  return (u.active ? 'active' : 'inactive') + ', ' + u.role + ', ' + d + caps + (u.expires_on ? ', until ' + u.expires_on : '');
+  return (u.active ? 'active' : 'inactive') + ', ' + u.role + ', ' + d + (u.expires_on ? ', until ' + u.expires_on : '');
 }
 
 /** Add or change a person. Returns {user, warnings} where warnings lists sharing steps that did not work. */
@@ -73,8 +65,8 @@ function saveUser_(actor, body) {
   if (!emailOk_(email)) throw new ApiError('Enter the person\'s Google account email address.');
   var wantRole = roleOf_(body.role);
   var want = { full_name: String(body.full_name || '').trim(), role: wantRole, active: body.active !== false, parent_access: !!body.parent_access,
-    donor_access: !!body.donor_access, org_overview: !!body.org_overview && wantRole !== 'staff', caps: wantRole === 'admin' ? parseCaps_(body.caps) : [], expires_on: null };
-  if (wantRole === 'master') { want.parent_access = want.donor_access = want.org_overview = true; } // a master has every department
+    donor_access: !!body.donor_access, org_overview: !!body.org_overview && wantRole !== 'staff', expires_on: null };
+  if (wantRole === 'master') { want.parent_access = want.donor_access = want.org_overview = true; }
   if (String(body.expires_on || '').trim()) {
     want.expires_on = parseDateInput_(body.expires_on);
     if (!want.expires_on) throw new ApiError('The end date is not valid.');
@@ -85,36 +77,24 @@ function saveUser_(actor, body) {
     rows.forEach(function (r) { if (String(r.email).toLowerCase() === email) row = row || r; });
     var before = row ? publicUser_(row) : publicUser_({ email: email, active: false, role: 'staff', parent_access: 'FALSE', donor_access: 'FALSE', org_overview: 'FALSE' });
     var isSelf = email === actor.email, changed = want.role !== before.role || want.active !== before.active || want.parent_access !== before.parent_access ||
-      want.donor_access !== before.donor_access || want.org_overview !== before.org_overview || want.caps.join() !== before.caps.join() ||
-      (want.expires_on || null) !== (before.expires_on || null);
+      want.donor_access !== before.donor_access || want.org_overview !== before.org_overview || (want.expires_on || null) !== (before.expires_on || null);
     if (before.owner && !isSelf) throw new ApiError('The project owner cannot be changed by anyone else.', null, 403);
     if (isSelf && before.owner && changed && (want.role !== 'master' || !want.active)) throw new ApiError('The owner\'s access is permanent and cannot be reduced.');
     if (isSelf && !before.owner && changed) throw new ApiError('You cannot change your own role, status or access. Ask another administrator.');
-    if (isSelf && before.owner) { want.role = 'master'; want.active = true; want.parent_access = want.donor_access = want.org_overview = true; want.caps = []; want.expires_on = null; }
+    if (isSelf && before.owner) { want.role = 'master'; want.active = true; want.parent_access = want.donor_access = want.org_overview = true; want.expires_on = null; }
 
     if (actor.role !== 'master') {
-      // a delegated administrator manages ordinary staff in the departments it administers, nothing else
-      if (actor.caps.indexOf('users_parent') < 0 && actor.caps.indexOf('users_donor') < 0) throw new ApiError('Your administrator role does not include managing people.', null, 403);
-      if (row && before.role !== 'staff') throw new ApiError('Only a master administrator can change administrators.', null, 403);
-      if (want.role !== 'staff') throw new ApiError('Only a master administrator can create administrators.', null, 403);
-      if (want.org_overview !== before.org_overview) throw new ApiError('Only a master administrator can give or remove Organisation Overview access.', null, 403);
-      if (want.parent_access !== before.parent_access && actor.caps.indexOf('users_parent') < 0) throw new ApiError('You can only change Parent access if you manage Parent users.', null, 403);
-      if (want.donor_access !== before.donor_access && actor.caps.indexOf('users_donor') < 0) throw new ApiError('You can only change Donor access if you manage Donor users.', null, 403);
-      if ((before.parent_access && actor.caps.indexOf('users_parent') < 0) || (before.donor_access && actor.caps.indexOf('users_donor') < 0))
-        throw new ApiError('You can only manage people whose departments you administer.', null, 403);
+      throw new ApiError('Only a master can manage users.', null, 403);
     } else {
       if (before.role === 'master' && !before.owner && !actor.owner) throw new ApiError('Only the owner can change a master administrator.', null, 403);
       if ((want.role === 'master') !== (before.role === 'master') && !actor.owner) throw new ApiError('Only the owner can appoint or remove master administrators.', null, 403);
     }
-    if (want.caps.indexOf('users_parent') >= 0 && !want.parent_access) throw new ApiError('To manage Parent users the person needs Parent access themselves (they share the Parent sheet).');
-    if (want.caps.indexOf('users_donor') >= 0 && !want.donor_access) throw new ApiError('To manage Donor users the person needs Donor access themselves (they share the Donor sheet).');
-    if (want.role === 'admin' && !want.caps.length) throw new ApiError('Choose at least one thing this administrator can manage.');
-    if (!owner) { // without a recorded owner, keep at least one active master
+    if (!owner) {
       var masters = rows.filter(function (r) { var u = publicUser_(r); return u.active && u.role === 'master' && u.email !== email; }).length + (want.active && want.role === 'master' ? 1 : 0);
       if (!masters) throw new ApiError('At least one active master administrator must remain.');
     }
     var store = { email: email, full_name: want.full_name || (row && row.full_name) || '', active: want.active, parent_access: want.parent_access ? 'TRUE' : 'FALSE',
-      donor_access: want.donor_access ? 'TRUE' : 'FALSE', org_overview: want.org_overview ? 'TRUE' : 'FALSE', role: want.role, admin_caps: want.caps.join(','), expires_on: want.expires_on };
+      donor_access: want.donor_access ? 'TRUE' : 'FALSE', org_overview: want.org_overview ? 'TRUE' : 'FALSE', role: want.role, expires_on: want.expires_on };
     if (row) { Object.keys(store).forEach(function (k) { row[k] = store[k]; }); saveRows_('Admins', [row]); }
     else insertRows_('Admins', [store]);
     var after = publicUser_(store);
@@ -144,7 +124,7 @@ function expireAccess_() {
 /** What a person should have on each file. */
 function expectedLevels_(u) {
   var on = u.active && !u.expired;
-  return { access: on ? (isAdminUser_(u) ? 'edit' : 'view') : null, parent: on && u.parent_access ? 'edit' : null, donor: on && u.donor_access ? 'edit' : null };
+  return { access: on ? (u.role === 'master' ? 'edit' : 'view') : null, parent: on && u.parent_access ? 'edit' : null, donor: on && u.donor_access ? 'edit' : null };
 }
 
 function lowerEmails_(users) { return users.map(function (x) { return String(x.getEmail()).toLowerCase(); }); }
@@ -154,7 +134,7 @@ function setFileAccess_(file, email, level, warnings) {
   if (!id) return;
   try {
     var f = DriveApp.getFileById(id), owner = f.getOwner();
-    if (owner && String(owner.getEmail()).toLowerCase() === email) return;       // the owner always has access
+    if (owner && String(owner.getEmail()).toLowerCase() === email) return;
     var editors = lowerEmails_(f.getEditors()), viewers = lowerEmails_(f.getViewers());
     if (level === 'edit') { if (editors.indexOf(email) < 0) f.addEditor(email); }
     else if (level === 'view') { if (editors.indexOf(email) >= 0) f.removeEditor(email); if (viewers.indexOf(email) < 0) f.addViewer(email); }
@@ -164,17 +144,16 @@ function setFileAccess_(file, email, level, warnings) {
   }
 }
 
-/** Make the Google sharing of the three files match one person's access. Returns warnings. */
+/** Make the Google sharing of the three files match one person\'s access. Returns warnings. */
 function syncSharingFor_(u) {
   var warnings = [], exp = expectedLevels_(u);
   PEOPLE_FILES.forEach(function (file) {
-    // someone who may not open a department must not be touched on it by an administrator without it either
     setFileAccess_(file, u.email, exp[file], warnings);
   });
   return warnings;
 }
 
-/** Re-apply everybody's sharing. strict = also remove anyone shared on a file who should not be. Owner and the caller are never removed. */
+/** Re-apply everybody\'s sharing. strict = also remove anyone shared on a file who should not be. Owner and the caller are never removed. */
 function syncAllSharing_(strict, keepEmail) {
   var warnings = [], users = loadTable_('Admins').filter(function (r) { return r.email; }).map(publicUser_), removed = 0;
   var expected = { access: {}, parent: {}, donor: {} };
@@ -197,7 +176,7 @@ function syncAllSharing_(strict, keepEmail) {
 
 /** Who can open each file in Drive, compared with what the Admins tab says. */
 function auditAccess_(actor) {
-  requireCap_(actor, 'audit');
+  requireAdmin_(actor);
   var users = loadTable_('Admins').filter(function (r) { return r.email; }).map(publicUser_), expected = { access: {}, parent: {}, donor: {} };
   users.forEach(function (u) { var e = expectedLevels_(u); PEOPLE_FILES.forEach(function (f) { if (e[f]) expected[f][u.email] = e[f]; }); });
   return PEOPLE_FILES.map(function (file) {
@@ -271,8 +250,8 @@ var BUILD_Permissions = '20261107-1230'; // build stamp (see Build.gs)
  * Permissions live on the Admins tab of the Access file (explicit TRUE/FALSE per person, never inferred from role), edited from the app (Users and access):
  *   parent_access  Parent Communication
  *   donor_access   Donor Communication
- *   org_overview   Organisation Overview (only honoured when role = admin)
- *   role           admin | staff   (informational; an admin does NOT automatically see any division)
+ *   org_overview   Organisation Overview (only honoured when role = master)
+ *   role           master | staff   (informational)
  * Every API call re-reads this sheet, so a revoked permission takes effect on the very next request.
  * The browser UI only mirrors this; it is never trusted.
  */
@@ -282,19 +261,11 @@ var DIVISION_BY_PREFIX = { parents: 'parent', templates: 'parent', campaigns: 'p
 function flag_(v) { return String(v === null || v === undefined ? '' : v).trim().toUpperCase() === 'TRUE'; }
 
 /**
- * Roles: master (the project owner is always one, and cannot be locked out), admin (manages only what it was given), staff.
- * An administrator's capabilities say what it may manage. A master has all of them.
+ * Roles: master (the project owner is always one, and cannot be locked out), or staff.
  */
-var ADMIN_CAPS = { users_parent: 'Manage Parent users', users_donor: 'Manage Donor users', audit: 'See the access log and check access' };
-
 function ownerEmail_() { return String(PropertiesService.getScriptProperties().getProperty('OWNER_EMAIL') || '').toLowerCase(); }
-function roleOf_(v) { var r = String(v || '').toLowerCase(); return r === 'master' ? 'master' : r === 'admin' ? 'admin' : 'staff'; }
-function parseCaps_(v) {
-  var list = Array.isArray(v) ? v : String(v || '').split(','), out = [];
-  list.forEach(function (c) { c = String(c).trim(); if (ADMIN_CAPS[c] && out.indexOf(c) < 0) out.push(c); });
-  return out;
-}
-function isAdminUser_(u) { return !!u && (u.role === 'master' || (u.role === 'admin' && u.caps.length > 0)); }
+function roleOf_(v) { var r = String(v || '').toLowerCase(); return r === 'master' ? 'master' : 'staff'; }
+function isAdminUser_(u) { return !!u && u.role === 'master'; }
 
 /** Fresh permissions for an email, or null if the person has no access (not listed, inactive, or past their end date). */
 function permissionsFor_(email) {
@@ -302,17 +273,15 @@ function permissionsFor_(email) {
   if (!email) return null;
   var owner = email === ownerEmail_();
   var all = loadTable_('Admins').filter(function (r) { return String(r.email).toLowerCase() === email; });
-  var r = all.filter(function (x) { return x.active; })[0] || (owner ? all[0] : null); // the owner is never locked out
+  var r = all.filter(function (x) { return x.active; })[0] || (owner ? all[0] : null);
   if (!r && !owner) return null;
   r = r || {};
-  if (!owner && r.expires_on && todayStr_() > r.expires_on) return null;                 // access has ended
-  // Rows created before divisions existed have all three columns blank: they keep their old Parent access.
+  if (!owner && r.expires_on && todayStr_() > r.expires_on) return null;
   var legacy = !owner && r.parent_access === null && r.donor_access === null && r.org_overview === null;
-  var role = owner ? 'master' : roleOf_(r.role), elevated = role !== 'staff';
-  var caps = role === 'master' ? Object.keys(ADMIN_CAPS) : role === 'admin' ? parseCaps_(r.admin_caps) : [];
+  var role = owner ? 'master' : roleOf_(r.role);
   return {
-    email: email, full_name: r.full_name || '', role: role, owner: owner, caps: caps, expires_on: r.expires_on || null,
-    divisions: { parent: owner || role === 'master' || (legacy ? true : flag_(r.parent_access)), donor: owner || role === 'master' || flag_(r.donor_access), overview: owner || role === 'master' || (elevated && flag_(r.org_overview)) }
+    email: email, full_name: r.full_name || '', role: role, owner: owner, expires_on: r.expires_on || null,
+    divisions: { parent: owner || role === 'master' || (legacy ? true : flag_(r.parent_access)), donor: owner || role === 'master' || flag_(r.donor_access), overview: owner || role === 'master' || flag_(r.org_overview) }
   };
 }
 
@@ -338,11 +307,11 @@ function sessionInfo_(user) {
   var entries = entriesOf_(user), last = null;
   try { last = PropertiesService.getUserProperties().getProperty('last_division'); } catch (e) { last = null; }
   return {
-    user: { email: user.email, full_name: user.full_name, role: user.role, caps: user.caps, owner: user.owner },
+    user: { email: user.email, full_name: user.full_name, role: user.role, owner: user.owner },
     can_admin: isAdminUser_(user), contact: ownerEmail_(), server_build: buildReport_().newest, build_problem: buildProblems_(),
     entries: entries,
     mode: !entries.length ? 'denied' : entries.length === 1 ? 'single' : 'select',
-    last_division: entries.indexOf(last) >= 0 ? last : null // a remembered division never grants access
+    last_division: entries.indexOf(last) >= 0 ? last : null
   };
 }
 
@@ -419,7 +388,7 @@ function onOpen() {
       .addItem('Check configuration', 'checkConfig')
       .addItem('Run cron tick now', 'cronTick')
       .addToUi();
-  } catch (e) { /* not bound to a spreadsheet */ }
+  } catch (e) { }
 }
 
 function installTriggersMenu_() { toast_(installTriggers()); }
@@ -456,7 +425,7 @@ function ensureFile_(file) {
 /**
  * A donor tab whose columns are not in SCHEMA order (for example one made by an older version that had more columns):
  * rewrites it in SCHEMA order, matching columns by header name. Nothing is lost: columns the app no longer uses go to the
- * right of the app's columns with their data, and a copy of the tab is kept first as a backup. Returns a note for the log.
+ * right of the app\'s columns with their data, and a copy of the tab is kept first as a backup. Returns a note for the log.
  */
 function reorderDonorTab_(ss, sh, name) {
   return withLock_(function () {
@@ -469,19 +438,19 @@ function reorderDonorTab_(ss, sh, name) {
       if (seen[keys[k]]) return 'The "' + name + '" tab has the column "' + vals[0][k] + '" twice, so it was not reordered. Remove one, then run setup again.';
       seen[keys[k]] = true;
     }
-    var want = fieldNames_(name), from = want.map(function (f) { return keys.indexOf(f); });   // -1: a new column, starts empty
+    var want = fieldNames_(name), from = want.map(function (f) { return keys.indexOf(f); });
     var extras = [];
     keys.forEach(function (key, j) {
       if (want.indexOf(key) >= 0) return;
       var hasData = vals.some(function (r, i) { return i > 0 && r[j] !== '' && r[j] !== null; });
-      if (key || hasData) extras.push(j);   // an old column the app no longer uses: kept, to the right
+      if (key || hasData) extras.push(j);
     });
     var order = from.concat(extras), width = order.length;
     var out = vals.map(function (r, i) {
       return order.map(function (j, c) {
         if (i === 0) return c < want.length ? want[c] : r[j];
         if (j < 0) return '';
-        return r[j] instanceof Date ? shown[i][j] : r[j];   // keep a date exactly as the sheet shows it
+        return r[j] instanceof Date ? shown[i][j] : r[j];
       });
     });
     var backup = sh.copyTo(ss).setName(name + ' (before reorder ' + Utilities.formatDate(new Date(), cfg_().APP_TIMEZONE, 'yyyy-MM-dd HHmm') + ')');
@@ -491,7 +460,7 @@ function reorderDonorTab_(ss, sh, name) {
     sh.getRange(1, 1, out.length, width).setValues(out);
     sheetCache_ = {};
     var kept = extras.map(function (j) { return String(vals[0][j] || '(no header)'); });
-    return 'The "' + name + '" tab was put into the app’s column order (a copy is kept as "' + backup.getName() + '").' +
+    return 'The "' + name + '" tab was put into the app\'s column order (a copy is kept as "' + backup.getName() + '").' +
       (kept.length ? ' Columns the app no longer uses were kept on the right: ' + kept.join(', ') + '.' : '');
   });
 }
@@ -506,17 +475,17 @@ function setup() {
   var layoutNotes = [];
   Object.keys(SCHEMA).forEach(function (name) {
     var ss = files[FILE_OF[name]], cols = SCHEMA[name], sh = ss.getSheetByName(name) || ss.insertSheet(name);
-    if (FILE_OF[name] === 'donor' && sh.getLastRow() > 1) {   // donor data in another column order: never relabel it, the data would no longer match
+    if (FILE_OF[name] === 'donor' && sh.getLastRow() > 1) {
       var bad = donorLayoutProblem_(sh, name, true);
-      if (bad) {   // e.g. a sheet made by an older version: move the columns into the app's order by their header names (nothing is lost)
+      if (bad) {
         var moved = reorderDonorTab_(ss, sh, name);
         if (moved) layoutNotes.push(moved);
         bad = donorLayoutProblem_(sh, name, true);
       }
-      if (bad) { layoutNotes.push(bad + ' Left as it is. Move its columns back into the app’s order, then run setup again.'); return; }
+      if (bad) { layoutNotes.push(bad + ' Left as it is. Move its columns back into the app\'s order, then run setup again.'); return; }
     }
     if (sh.getMaxColumns() < cols.length) sh.insertColumnsAfter(sh.getMaxColumns(), cols.length - sh.getMaxColumns());
-    sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@'); // plain text everywhere
+    sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
     sh.getRange(1, 1, 1, cols.length).setValues([cols.map(function (c) { return c[0]; })]).setFontWeight('bold');
     sh.setFrozenRows(1);
   });
@@ -530,7 +499,6 @@ function setup() {
 
   var notes = layoutNotes.concat(migrateToSeparateFiles_(files));
   if (parentsNote) notes.push(parentsNote);
-  // The person who runs setup is the project owner: permanently the master administrator (kept in a Script property, not a sheet).
   var me = (Session.getEffectiveUser().getEmail() || Session.getActiveUser().getEmail() || '').toLowerCase();
   if (me && !props.getProperty('OWNER_EMAIL')) props.setProperty('OWNER_EMAIL', me);
   if (!loadTable_('Admins').length && me) insertRows_('Admins', [{ email: me, full_name: '', active: true, parent_access: 'TRUE', donor_access: 'TRUE', org_overview: 'TRUE', role: 'master' }]);
@@ -546,7 +514,7 @@ function setup() {
 }
 
 /**
- * The Parents tab changed to Ek Tara's columns (one row per child, keyed on New Child ID). Old rows can't be converted,
+ * The Parents tab changed to Ek Tara\'s columns (one row per child, keyed on New Child ID). Old rows can\'t be converted,
  * so an old-style tab is renamed and kept as a backup, and setup creates a fresh one. Returns a note for the log, or null.
  */
 function retireOldParentsSheet_(ss) {
@@ -554,7 +522,7 @@ function retireOldParentsSheet_(ss) {
   if (!sh || parentsHeaderOk_(sh)) return null;
   var name = 'Parents (old ' + Utilities.formatDate(new Date(), cfg_().APP_TIMEZONE, 'yyyy-MM-dd HHmm') + ')';
   sh.setName(name);
-  return 'The old Parents tab was renamed to "' + name + '" and kept as a backup. Upload Ek Tara\u2019s file on the Parent Info page to fill the new one. Old campaigns still show who they went to.';
+  return 'The old Parents tab was renamed to "' + name + '" and kept as a backup. Upload Ek Tara\'s file on the Parent Info page to fill the new one. Old campaigns still show who they went to.';
 }
 
 /**
@@ -583,7 +551,6 @@ function migrateToSeparateFiles_(files) {
     }
     parent.deleteSheet(legacy);
   });
-  // donor templates that were kept in the parent Templates tab
   try {
     var tpls = loadTable_('Templates'), donorTpls = tpls.filter(function (t) { return t.division === 'donor'; });
     if (donorTpls.length && !loadTable_('DonorTemplates').length) {
@@ -593,7 +560,6 @@ function migrateToSeparateFiles_(files) {
       notes.push('Moved ' + donorTpls.length + ' donor template(s) to the donor file.');
     }
   } catch (e) { notes.push('Donor templates: ' + e.message); }
-  // donor events that were logged in the parent Events tab
   try {
     var ids = {}; loadTable_('DonorMessages').forEach(function (m) { ids[m.id] = true; });
     var evs = loadTable_('Events'), mine = evs.filter(function (e) { return e.message_id && ids[e.message_id]; });
@@ -627,7 +593,7 @@ function showWebhookUrls() {
   var text = 'Twilio -> WhatsApp sender -> "When a message comes in" (POST):\n' + inbound +
     '\n\nOptional external scheduler (POST):\n' + cron;
   console.log(text);
-  try { SpreadsheetApp.getUi().alert('Webhook URLs', text, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) { /* editor run */ }
+  try { SpreadsheetApp.getUi().alert('Webhook URLs', text, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) { }
   return text;
 }
 
@@ -652,10 +618,6 @@ function migrateAdmins_() {
     }
     if (owner && roleOf_(r.role) !== 'master') { r.role = 'master'; changed = true; }
     else if (!r.role) { r.role = 'staff'; changed = true; }
-    // administrators from before scoped roles keep what they could do: manage the departments they hold, and see the log
-    if (roleOf_(r.role) === 'admin' && !r.admin_caps) {
-      r.admin_caps = [flag_(r.parent_access) ? 'users_parent' : '', flag_(r.donor_access) ? 'users_donor' : '', 'audit'].filter(Boolean).join(','); changed = true;
-    }
     if (changed) dirty.push(r);
   });
   saveRows_('Admins', dirty);
@@ -710,13 +672,13 @@ function repairOwnerAccess() {
   PropertiesService.getScriptProperties().setProperty('OWNER_EMAIL', me);
   withLock_(function () {
     var row = loadTable_('Admins').filter(function (r) { return String(r.email).toLowerCase() === me; })[0];
-    var fields = { email: me, active: true, parent_access: 'TRUE', donor_access: 'TRUE', org_overview: 'TRUE', role: 'master', admin_caps: '', expires_on: null };
+    var fields = { email: me, active: true, parent_access: 'TRUE', donor_access: 'TRUE', org_overview: 'TRUE', role: 'master', expires_on: null };
     if (row) { Object.keys(fields).forEach(function (k) { row[k] = fields[k]; }); saveRows_('Admins', [row]); }
     else { fields.full_name = ''; insertRows_('Admins', [fields]); }
-    try { logAccess_(me, 'owner.repair', me, 'Owner restored as administrator with all access'); } catch (e) { /* the log is optional here */ }
+    try { logAccess_(me, 'owner.repair', me, 'Owner restored as administrator with all access'); } catch (e) { }
   });
   var r = syncAllSharing_(false);
-  var msg = me + ' is now the master administrator with Parent, Donor and Overview access.' + (r.warnings.length ? ' Sharing notes: ' + r.warnings.join('; ') : '') + ' Open the app again (hard refresh).';
+  var msg = me + ' is now a master administrator with Parent, Donor and Overview access.' + (r.warnings.length ? ' Sharing notes: ' + r.warnings.join('; ') : '') + ' Open the app again (hard refresh).';
   console.log(msg); toast_(msg);
   return msg;
 }

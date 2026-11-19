@@ -6,18 +6,16 @@ const FILE_NOTES = {
   parent: 'Parents, parent campaigns and messages. Shared only with people who have Parent Communication access.',
   donor: 'Donors, donations, donor campaigns and messages. Shared only with people who have Donor Communication access.'
 };
-const CAP_LABELS = { users_parent: 'Parent users', users_donor: 'Donor users', audit: 'Access log' };
-const roleBadge = u => u.owner ? '<span class="badge b-confirmed">Owner</span>' : u.role === 'master' ? '<span class="badge b-confirmed">Master</span>' : u.role === 'admin' ? '<span class="badge b-sent">Administrator</span>' : 'Staff';
+const roleBadge = u => u.owner ? '<span class="badge b-confirmed">Owner</span>' : u.role === 'master' ? '<span class="badge b-confirmed">Master</span>' : 'Staff';
 // What the signed-in person may do to a given person (the server enforces the same rules).
 function canManage(actor, u) {
   if (actor.role === 'master') return !u.owner || u.email === actor.email;
-  if (u.role !== 'staff') return false;
-  return (!u.parent_access || actor.caps.indexOf('users_parent') >= 0) && (!u.donor_access || actor.caps.indexOf('users_donor') >= 0) && (actor.caps.indexOf('users_parent') >= 0 || actor.caps.indexOf('users_donor') >= 0);
+  return false;
 }
 
 views['admin/users'] = async function () {
-  const me = state.session.user, isMaster = me.role === 'master', canAudit = isMaster || me.caps.indexOf('audit') >= 0;
-  const [users, files, log, addr] = await Promise.all([call('admin.users.list'), call('admin.files'), canAudit ? call('admin.log') : Promise.resolve(null), call('admin.addresses')]);
+  const me = state.session.user, isMaster = me.role === 'master';
+  const [users, files, log, addr] = await Promise.all([call('admin.users.list'), call('admin.files'), isMaster ? call('admin.log') : Promise.resolve(null), call('admin.addresses')]);
   const tick = v => v ? '<span class="badge b-approved">Yes</span>' : '<span class="muted">No</span>';
   const masters = users.filter(u => u.role === 'master' && u.active).length;
   const until = u => u.expires_on ? (u.expired ? '<span class="badge b-cancelled">Ended ' + esc(u.expires_on) + '</span>' : '<span class="small">' + esc(u.expires_on) + '</span>') : '<span class="muted">No end date</span>';
@@ -25,13 +23,11 @@ views['admin/users'] = async function () {
     '<div class="head"><div><h1>Users and access</h1><p class="sub">Choose who can use the app and which department each person can open. Saving a person also shares or unshares the Google Sheets, so the departments stay separate.</p></div><button class="btn primary" id="addu">Add user</button></div>' +
     (me.owner && masters < 2 ? '<div class="alert info"><b>You are the only master administrator.</b> Appoint a second one so access can still be managed if you are away. Also keep the three Google Sheets in an organisation account (not a personal one) with 2-step verification turned on.</div>' : '') +
     '<div class="card scroll"><table><thead><tr><th>Person</th><th>Role</th><th>Parent</th><th>Donor</th><th>Overview</th><th>Access until</th><th>Status</th><th></th></tr></thead><tbody>' + users.map(u =>
-      '<tr><td><b>' + esc(u.full_name || u.email) + '</b>' + (u.email === me.email ? ' <span class="tag">You</span>' : '') + '<div class="small muted">' + esc(u.email) + '</div></td><td>' + roleBadge(u) +
-      (u.role === 'admin' ? '<div class="small muted">' + u.caps.map(c => esc(CAP_LABELS[c] || c)).join(', ') + '</div>' : '') + '</td><td>' + tick(u.parent_access) + '</td><td>' + tick(u.donor_access) + '</td><td>' + tick(u.org_overview) + '</td><td>' + until(u) + '</td><td>' +
+      '<tr><td><b>' + esc(u.full_name || u.email) + '</b>' + (u.email === me.email ? ' <span class="tag">You</span>' : '') + '<div class="small muted">' + esc(u.email) + '</div></td><td>' + roleBadge(u) + '</td><td>' + tick(u.parent_access) + '</td><td>' + tick(u.donor_access) + '</td><td>' + tick(u.org_overview) + '</td><td>' + until(u) + '</td><td>' +
       (u.active && !u.expired ? '<span class="badge b-approved">Active</span>' : '<span class="badge b-cancelled">Inactive</span>') + '</td><td>' + (canManage(me, u) ? '<button class="btn small" data-e="' + esc(u.email) + '">Edit</button>' : '<span class="muted small">View only</span>') + '</td></tr>').join('') + '</tbody></table></div>' +
     '<details class="card"><summary style="cursor:pointer;font-weight:600">What each role can do</summary><div class="scroll" style="margin-top:10px"><table><thead><tr><th>Role</th><th>Can do</th></tr></thead><tbody>' +
       '<tr><td><b>Owner</b></td><td class="small">The person who set up the project. Always a master administrator, cannot be removed or locked out, and is the only one who appoints other masters.</td></tr>' +
-      '<tr><td><b>Master</b></td><td class="small">Everything, in every department: add and change administrators and staff, give Organisation Overview access, see the access log, check and fix file sharing. Masters can open all three files.</td></tr>' +
-      '<tr><td><b>Administrator</b></td><td class="small">Only what a master gave them: <b>Parent users</b> (add and manage parent staff), <b>Donor users</b> (same for donor staff), and/or <b>Access log</b> (see changes and check who can open each file). They manage ordinary staff only, never other administrators.</td></tr>' +
+      '<tr><td><b>Master</b></td><td class="small">Everything: add and change staff, give Organisation Overview access, see the access log, check and fix file sharing. Masters can open all three files.</td></tr>' +
       '<tr><td><b>Staff</b></td><td class="small">Work in the departments they were given. Can set an end date so access stops by itself.</td></tr></tbody></table></div></details>' +
     '<div class="card"><h2>Where the data lives</h2><p class="small muted" style="margin-top:0">Three separate Google Sheets. Someone who is not shared on a sheet cannot open it, in the app or in Google Drive.</p><div class="scroll"><table><tbody>' + files.map(f =>
       '<tr><td style="width:28%"><b>' + esc(f.label) + '</b><div class="small muted">' + esc(f.name) + '</div></td><td class="small">' + esc(FILE_NOTES[f.file]) + '</td><td style="white-space:nowrap">' + (f.url ? '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">Open sheet</a>' : '<span class="muted small">' + esc(f.error || 'Not created yet') + '</span>') + '</td></tr>').join('') + '</tbody></table></div></div>' +
@@ -43,13 +39,13 @@ views['admin/users'] = async function () {
       '<tr><td><b>Twilio address</b><div class="small muted">optional</div></td><td class="small">Only needed for instant updates and phone calls. Twilio uses it to call the app back; nobody opens it. Set to: <i>Execute as: Me</i> and <i>Who has access: Anyone</i>. Saved in settings as <code>PUBLIC_BASE_URL</code>.</td><td class="small">' +
         (addr.twilio ? '<code style="word-break:break-all">' + esc(addr.twilio) + '</code> <button class="btn small" id="cpt">Copy</button>' : '<span class="muted">Not set: not needed</span>') + '</td></tr></tbody></table></div>' +
       '<p class="small muted" style="margin-bottom:0">After any update, make a <b>New version</b> on each address you use. To test the Twilio address, type <code>?hook=ping</code> after <code>/exec</code> and open it; it should say &ldquo;webhook ok&rdquo;.</p></div>' +
-    (canAudit ? '<div class="card"><h2>Check who can open each file</h2><p class="small muted" style="margin-top:0">Compares the people shared on each Google Sheet with what is set above. It catches sheets shared by hand in Google Drive.</p><button class="btn" id="audit">Check access</button><div id="auditout" style="margin-top:14px"></div></div>' +
+    (isMaster ? '<div class="card"><h2>Check who can open each file</h2><p class="small muted" style="margin-top:0">Compares the people shared on each Google Sheet with what is set above. It catches sheets shared by hand in Google Drive.</p><button class="btn" id="audit">Check access</button><div id="auditout" style="margin-top:14px"></div></div>' +
       '<div class="card"><h2>Recent changes</h2>' + (log.length ? '<ul class="tl">' + log.map(l => '<li><b>' + esc(l.action.replace('.', ' ')) + '</b> ' + esc(l.email) + ' <span class="muted small">by ' + esc(l.by) + ' \u00b7 ' + esc(timeAgo(l.at)) + '</span>' + (l.details ? '<div class="small muted">' + esc(l.details) + '</div>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">Nothing yet.</p>') + '</div>' : '');
   $('#back').onclick = goHome;
   const cpt = $('#cpt'); if (cpt) cpt.onclick = () => navigator.clipboard.writeText(addr.twilio).then(() => toast('Copied'), () => toast('Select the address and copy it by hand', true));
   $('#addu').onclick = () => userForm(null);
   $$('[data-e]').forEach(b => b.onclick = () => userForm(users.find(u => u.email === b.dataset.e)));
-  if (canAudit) $('#audit').onclick = runAudit;
+  if (isMaster) $('#audit').onclick = runAudit;
   async function runAudit() {
     const out = $('#auditout'); out.innerHTML = '<div class="small muted">Checking\u2026</div>';
     try {
@@ -65,34 +61,31 @@ views['admin/users'] = async function () {
 
 function userForm(u) {
   const me = state.session.user, isMaster = me.role === 'master', isNew = !u, self = u && u.email === me.email;
-  u = u || { email: '', full_name: '', role: 'staff', active: true, parent_access: false, donor_access: false, org_overview: false, caps: [], expires_on: null };
-  const canDept = d => isMaster || me.caps.indexOf('users_' + d) >= 0, locked = self ? 'disabled' : '';
+  u = u || { email: '', full_name: '', role: 'staff', active: true, parent_access: false, donor_access: false, org_overview: false, expires_on: null };
+  const locked = self ? 'disabled' : '';
   const m = modal('<h2>' + (isNew ? 'Add user' : 'Edit user') + '</h2>' +
     fld('Google account email', '<input id="u-email" type="email" value="' + esc(u.email) + '" ' + (isNew ? '' : 'disabled') + ' placeholder="name@gmail.com">') + fld('Name', '<input id="u-name" value="' + esc(u.full_name) + '">') +
-    fld('Role', '<select id="u-role" ' + (self || !isMaster ? 'disabled' : '') + '>' + opt('staff', 'Staff: works in the departments below', u.role === 'staff') + (isMaster ? opt('admin', 'Administrator: manages only what you choose', u.role === 'admin') : '') + (me.owner ? opt('master', 'Master: can do everything', u.role === 'master') : u.role === 'master' ? opt('master', 'Master', true) : '') + '</select>') +
-    '<div id="capbox" ' + (u.role === 'admin' ? '' : 'hidden') + '><label>This administrator can manage</label><div class="checks" style="flex-direction:column;align-items:flex-start">' +
-      '<label><input type="checkbox" data-cap="users_parent" ' + (u.caps.indexOf('users_parent') >= 0 ? 'checked' : '') + ' ' + locked + '> Parent users (add and manage parent staff; needs Parent access below)</label>' +
-      '<label><input type="checkbox" data-cap="users_donor" ' + (u.caps.indexOf('users_donor') >= 0 ? 'checked' : '') + ' ' + locked + '> Donor users (add and manage donor staff; needs Donor access below)</label>' +
-      '<label><input type="checkbox" data-cap="audit" ' + (u.caps.indexOf('audit') >= 0 ? 'checked' : '') + ' ' + locked + '> Access log (see changes and check who can open each file)</label></div></div>' +
+    fld('Role', '<select id="u-role" ' + (self || !isMaster ? 'disabled' : '') + '>' + opt('staff', 'Staff: works in the departments below', u.role === 'staff') + (me.owner ? opt('master', 'Master: can do everything', u.role === 'master') : u.role === 'master' ? opt('master', 'Master', true) : '') + '</select>') +
     '<label>Can open</label><div class="checks" style="flex-direction:column;align-items:flex-start">' +
-    '<label><input type="checkbox" id="u-parent" ' + (u.parent_access ? 'checked' : '') + ' ' + (self || !canDept('parent') ? 'disabled' : '') + '> Parent Communication</label>' +
-    '<label><input type="checkbox" id="u-donor" ' + (u.donor_access ? 'checked' : '') + ' ' + (self || !canDept('donor') ? 'disabled' : '') + '> Donor Communication</label>' +
-    '<label id="ovl"><input type="checkbox" id="u-ov" ' + (u.org_overview ? 'checked' : '') + '> Organisation Overview (totals only; administrators and masters, set by a master)</label></div>' +
+    '<label><input type="checkbox" id="u-parent" ' + (u.parent_access ? 'checked' : '') + ' ' + (self ? 'disabled' : '') + '> Parent Communication</label>' +
+    '<label><input type="checkbox" id="u-donor" ' + (u.donor_access ? 'checked' : '') + ' ' + (self ? 'disabled' : '') + '> Donor Communication</label>' +
+    '<label id="ovl"><input type="checkbox" id="u-ov" ' + (u.org_overview ? 'checked' : '') + '> Organisation Overview (totals only; masters set by the owner)</label></div>' +
     fld('Access until (optional)', '<input id="u-until" type="date" value="' + esc(u.expires_on || '') + '" ' + locked + '>') + '<p class="small muted" style="margin-top:4px">After this date access stops by itself. Leave empty for no end date. Good for volunteers, interns and contractors.</p>' +
     '<label class="inline"><input type="checkbox" id="u-active" ' + (u.active ? 'checked' : '') + ' ' + locked + '> Active (can sign in)</label>' +
-    '<p class="small muted">' + (self ? (u.owner ? 'You are the owner. Your access is permanent. You can change your name.' : 'You cannot change your own role, status or access. Ask another administrator.') : isMaster ? 'Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.' : 'You can manage ordinary staff in the departments you administer. Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.') + '</p><div id="uerr"></div>' +
+    '<p class="small muted">' + (self ? (u.owner ? 'You are the owner. Your access is permanent. You can change your name.' : 'You cannot change your own role, status or access. Ask another administrator.') : isMaster ? 'Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.' : 'You can manage staff. Saving shares or unshares the matching Google Sheets, and the person may get an email from Google about it.') + '</p><div id="uerr"></div>' +
     '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">' + (isNew ? 'Add user' : 'Save changes') + '</button></div>', true);
   const syncRole = () => {
-    const r = $('#u-role', m).value; $('#capbox', m).hidden = r !== 'admin';
+    const r = $('#u-role', m).value;
     const ov = $('#u-ov', m), canOv = !self && isMaster && r !== 'staff'; ov.disabled = !canOv; if (!canOv && r === 'staff') ov.checked = false;
     if (r === 'master') { ['#u-parent', '#u-donor', '#u-ov'].forEach(id => { $(id, m).checked = true; $(id, m).disabled = true; }); }
+    else { ['#u-parent', '#u-donor', '#u-ov'].forEach(id => { $(id, m).disabled = false; }); }
   };
   $('#u-role', m).onchange = syncRole; syncRole(); $('#x', m).onclick = m.close;
   $('#s', m).onclick = async () => {
     const role = $('#u-role', m).value;
     try {
       const r = await call('admin.users.save', { email: val('u-email').trim(), full_name: val('u-name').trim(), role, active: $('#u-active', m).checked, parent_access: $('#u-parent', m).checked, donor_access: $('#u-donor', m).checked,
-        org_overview: $('#u-ov', m).checked, caps: role === 'admin' ? $$('[data-cap]', m).filter(c => c.checked).map(c => c.dataset.cap) : [], expires_on: val('u-until') });
+        org_overview: $('#u-ov', m).checked, expires_on: val('u-until') });
       m.close();
       if (r.warnings.length) { const w = modal('<h2>Saved, but check the sharing</h2><div class="alert">' + r.warnings.map(esc).join('<br>') + '</div><p class="small muted">The person is saved. Use Check access on the Users and access page to see exactly who can open each file.</p><div class="actions"><button class="btn primary" id="x">OK</button></div>'); $('#x', w).onclick = w.close; }
       else toast((isNew ? 'User added' : 'Saved') + '. File sharing updated');
