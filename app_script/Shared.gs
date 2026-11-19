@@ -449,11 +449,11 @@ var SCHEMA = {
   Donations: [['id', 's'], ['donor_id', 's'], ['campaign_id', 's'], ['amount', 's'], ['donated_on', 's'], ['note', 's'],
     ['recorded_by', 's'], ['recorded_at', 's']],
   DonorCampaigns: [['id', 's'], ['name', 's'], ['start_date', 's'], ['end_date', 's'], ['status', 's'],
-    ['progress_text', 's'], ['results_text', 's'], ['results_ready_at', 's'], ['notes', 's'], ['created_at', 's']],
+    ['progress_text', 's'], ['results_text', 's'], ['results_ready_at', 's'], ['notes', 's'], ['created_at', 's'], ['archived_at', 's']],   // archived_at: hidden from lists and pickers, kept for history
   DonorBroadcasts: [['id', 's'], ['trigger', 's'], ['kind', 's'], ['name', 's'], ['template_id', 's'], ['campaign_id', 's'],
     ['segments', 'j'], ['values', 'j'], ['send_on', 's'], ['event_date', 's'],
     ['status', 's'], ['created_by', 's'], ['approved_by', 's'], ['approved_at', 's'], ['message_count', 'n'],
-    ['created_at', 's'], ['excluded_tags', 'j'], ['channels', 'j']],   // channels: set on approval
+    ['created_at', 's'], ['excluded_tags', 'j'], ['channels', 'j'], ['archived_at', 's']],   // channels: set on approval; archived_at: hidden, kept for history
   DonorMessages: [['id', 's'], ['donor_id', 's'], ['channel', 's'], ['to_email', 's'], ['template_id', 's'], ['message_type', 's'],
     ['trigger', 's'], ['broadcast_id', 's'], ['campaign_id', 's'], ['donation_id', 's'], ['ref', 's'], ['variables', 'j'],
     ['dedupe_key', 's'], ['status', 's'], ['hold_reason', 's'], ['not_before', 's'], ['expires_at', 's'],
@@ -465,7 +465,7 @@ var SCHEMA = {
   Overview: [['key', 's'], ['value', 'j'], ['updated_at', 's']]
 };
 // Donor templates and donor events have the same shape as the parent ones, but live in the donor file.
-SCHEMA.DonorTemplates = SCHEMA.Templates.concat([['media_type', 's']]);   // donor only: '' | image | document (a WhatsApp media template)
+SCHEMA.DonorTemplates = SCHEMA.Templates.concat([['media_type', 's'], ['archived_at', 's']]);   // donor only: '' | image | document (a WhatsApp media template)
 SCHEMA.DonorEvents = SCHEMA.Events.slice();
 
 /**

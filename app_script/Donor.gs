@@ -19,7 +19,7 @@ function donorOverview_() {
     if (q[m.status] !== undefined) q[m.status]++;
     if (m.wa_sent_at && Date.parse(m.wa_sent_at) >= weekAgo) q.sent_7d++;
   });
-  var tpls = loadTable_('DonorTemplates').filter(function (t) { return t.status === 'approved'; });
+  var tpls = loadTable_('DonorTemplates').filter(function (t) { return t.status === 'approved' && !t.archived_at; });
   var haveType = {}; tpls.forEach(function (t) { haveType[t.message_type] = true; });
   return {
     ready: true, total: donors.length, opted_in: optedIn, segments: seg, queue: q,
@@ -76,18 +76,27 @@ var DONOR_API = {
   'donor.campaigns.list': function (u) { return listDonorCampaigns_(); },
   'donor.campaigns.save': function (u, id, body) { var r = saveDonorCampaign_(u, id, body); runDonorTriggers_(); return r; },
   'donor.campaigns.resultsReady': function (u, id) { return markResultsReady_(u, id); },
+  'donor.campaigns.archive': function (u, id) { return setDonorArchived_(u, 'DonorCampaigns', id, true); },
+  'donor.campaigns.restore': function (u, id) { return setDonorArchived_(u, 'DonorCampaigns', id, false); },
+  'donor.campaigns.delete': function (u, id) { return deleteDonorCampaign_(u, id); },
   'donor.templates.list': function (u) { return listDonorTemplates_(); },
   'donor.templates.create': function (u, body) { return createDonorTemplate_(u, body); },
   'donor.templates.update': function (u, id, body) { return updateDonorTemplate_(u, id, body); },
   'donor.templates.retrySubmit': function (u, id) { return retryDonorTemplate_(u, id); },
   'donor.templates.sync': function (u) { return syncPendingTemplates_(['DonorTemplates']); },
   'donor.templates.import': function (u) { return importDonorTemplates_(u); },
+  'donor.templates.archive': function (u, id) { return setDonorArchived_(u, 'DonorTemplates', id, true); },
+  'donor.templates.restore': function (u, id) { return setDonorArchived_(u, 'DonorTemplates', id, false); },
+  'donor.templates.delete': function (u, id) { return deleteDonorTemplate_(u, id); },
   'donor.broadcasts.list': function (u) { return listBroadcasts_(); },
   'donor.broadcasts.save': function (u, id, body) { return saveBroadcast_(u, id, body); },
   'donor.broadcasts.preview': function (u, id) { return previewBroadcast_(u, id); },
+  'donor.broadcasts.previewDraft': function (u, body) { return previewDraftBroadcast_(u, body); },   // preview without saving
   'donor.broadcasts.approve': function (u, id, opts) { return approveBroadcast_(u, id, opts); },
   'donor.broadcasts.cancel': function (u, id) { return cancelBroadcast_(u, id); },
   'donor.broadcasts.delete': function (u, id) { return deleteDraftBroadcast_(u, id); },
+  'donor.broadcasts.archive': function (u, id) { return setDonorArchived_(u, 'DonorBroadcasts', id, true); },
+  'donor.broadcasts.restore': function (u, id) { return setDonorArchived_(u, 'DonorBroadcasts', id, false); },
   'donor.messages.list': function (u, f) { return listDonorMessages_(u, f); },
   'donor.messages.cancel': function (u, id) { return cancelDonorMessage_(u, id); },
   'donor.messages.retry': function (u, id) { return retryDonorMessage_(u, id); },
@@ -611,8 +620,10 @@ function listDonorCampaigns_() {
     total[x.campaign_id] = (total[x.campaign_id] || 0) + (Number(x.amount) || 0);
     (donors[x.campaign_id] = donors[x.campaign_id] || {})[x.donor_id] = true;
   });
+  var use = donorUsage_([], loadTable_('DonorBroadcasts'), donations);   // donations and broadcasts per campaign
   return loadTable_('DonorCampaigns').sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).map(function (c) {
     var o = cleanDonorRow_(c); o.donor_count = Object.keys(donors[c.id] || {}).length; o.total_raised = total[c.id] || 0;
+    o.delete_block = campaignDeleteBlock_(c, use); o.can_delete = !o.delete_block;
     if (!o.status) o.status = 'planned';   // a blank status cell (e.g. typed into the sheet by hand) counts as planned
     return o;
   });
@@ -663,8 +674,11 @@ function checkDriveMedia_(value, mediaType) {
 }
 
 function listDonorTemplates_() {
+  var use = loadDonorUsage_();
   return loadTable_('DonorTemplates')
-    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).map(publicTemplate_);
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).map(function (t) {
+      var o = publicTemplate_(t); o.delete_block = templateDeleteBlock_(t, use); o.can_delete = !o.delete_block; return o;
+    });
 }
 
 function createDonorTemplate_(user, body) {
@@ -701,7 +715,8 @@ function updateDonorTemplate_(user, id, body) {
     if (names.length !== n || names.some(function (x) { return !x; })) throw new ApiError('Give a label for each of the ' + n + ' placeholders.');
     if (MEDIA_TYPES[t.media_type] && MEDIA_TYPES[body.media_type]) t.media_type = body.media_type;   // Image <-> PDF (an imported template is guessed)
     if (MEDIA_TYPES[t.media_type]) names.push(MEDIA_LABEL);   // the file's placeholder keeps its fixed label
-    t.message_type = body.message_type; t.source_code = strOrNull_(body.source_code); t.variable_names = names; t.updated_at = nowIso_();
+    t.message_type = body.message_type; t.variable_names = names; t.updated_at = nowIso_();
+    if (body.source_code !== undefined) t.source_code = strOrNull_(body.source_code);   // the screens no longer send it (Source was removed); a stored value is kept
     saveRows_('DonorTemplates', [t]);
     return publicTemplate_(t);
   });
@@ -749,10 +764,13 @@ function saveBroadcast_(user, id, body) {
 function listBroadcasts_() {
   var tpls = {}; loadTable_('DonorTemplates').forEach(function (t) { tpls[t.id] = t; });
   var camps = {}; loadTable_('DonorCampaigns').forEach(function (c) { camps[c.id] = c; });
-  var counts = {};
+  var counts = {}, sentBy = {}, waitingBy = {};   // sentBy / waitingBy: for the delete rule
   loadTable_('DonorMessages').forEach(function (m) {
     if (!m.broadcast_id) return;
-    var c = counts[m.broadcast_id] || (counts[m.broadcast_id] = { total: 0, sent: 0, waiting: 0, failed: 0 });
+    if (m.wa_sent_at) sentBy[m.broadcast_id] = true;
+    if (DONOR_STATUS_OPEN.indexOf(m.status) >= 0) waitingBy[m.broadcast_id] = true;
+    var c = counts[m.broadcast_id] || (counts[m.broadcast_id] = { total: 0, sent: 0, waiting: 0, failed: 0, replies: 0 });
+    if (m.status === 'received') { c.replies++; return; }   // a donor's reply: not a message we sent
     c.total++;
     if (['sent', 'delivered', 'read'].indexOf(m.status) >= 0) c.sent++; else if (m.status === 'failed') c.failed++; else if (DONOR_STATUS_OPEN.indexOf(m.status) >= 0) c.waiting++;
   });
@@ -760,7 +778,8 @@ function listBroadcasts_() {
     var o = cleanDonorRow_(b);
     o.template_name = b.template_id && tpls[b.template_id] ? tpls[b.template_id].name : null;
     o.campaign_name = b.campaign_id && camps[b.campaign_id] ? camps[b.campaign_id].name : null;
-    o.counts = counts[b.id] || { total: 0, sent: 0, waiting: 0, failed: 0 };
+    o.counts = counts[b.id] || { total: 0, sent: 0, waiting: 0, failed: 0, replies: 0 };
+    o.delete_block = broadcastDeleteBlock_(b, { bcSent: sentBy, bcWaiting: waitingBy }); o.can_delete = !o.delete_block;
     return o;
   });
 }
@@ -801,6 +820,18 @@ function broadcastContext_() {
 function previewBroadcast_(user, id) {
   var b = findOne_('DonorBroadcasts', 'id', id);
   if (!b) throw new ApiError('Not found', null, 404);
+  return previewBroadcastObj_(b);
+}
+
+/** The same preview for a broadcast that has not been saved: built from the form (checked like a save), nothing is written. */
+function previewDraftBroadcast_(user, body) {
+  body = Object.assign({}, body || {});
+  if (!strOrNull_(body.name)) body.name = 'Preview';   // a name is needed to save, not to look
+  return previewBroadcastObj_(cleanBroadcast_(body));
+}
+
+/** Audience, sample text and missing values of a broadcast (saved or not). */
+function previewBroadcastObj_(b) {
   var ctx = broadcastContext_(), donors = loadTable_('Donors');
   var all = broadcastAudience_(b, donors, ctx.donations, true), aud = all.filter(reachable_);
   var tpl = b.template_id ? findOne_('DonorTemplates', 'id', b.template_id) : null;
@@ -830,7 +861,7 @@ function previewBroadcast_(user, id) {
           out.media = { type: tpl.media_type, file_id: fid, view_url: 'https://drive.google.com/file/d/' + fid + '/view', thumb_url: 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w400' };
         } catch (e) { out.missing.unshift('Attachment: ' + e.message); }
       }
-      out.email_note = 'Emails get the text only; the ' + MEDIA_TYPES[tpl.media_type].label.toLowerCase() + ' goes by WhatsApp.';
+      out.email_note = tpl.media_type === 'image' ? 'Emails show the image above the text, as on WhatsApp.' : 'Emails carry the PDF as an attachment.';
     }
   }
   return out;
@@ -859,6 +890,7 @@ function approveBroadcast_(user, id, opts) {
     var tpl = b.template_id ? findOne_('DonorTemplates', 'id', b.template_id) : null;
     if (!tpl) throw new ApiError('Choose a template first.');
     if (tpl.status !== 'approved') throw new ApiError('That template is not approved by WhatsApp yet.');
+    if (tpl.archived_at) throw new ApiError('That template is archived. Restore it on the Templates page, or choose another.');
     if (tpl.message_type !== b.kind) throw new ApiError('That template is a "' + (MESSAGE_TYPES[tpl.message_type] || 'untyped') + '" template, not a "' + MESSAGE_TYPES[b.kind] + '".');
     if (MEDIA_TYPES[tpl.media_type] && !(b.values || {})[MEDIA_LABEL]) throw new ApiError('This template sends a file. Add the attachment (a Google Drive share link) first.');
     var ctx = broadcastContext_(), donors = loadTable_('Donors'), aud = broadcastAudience_(b, donors, ctx.donations);
@@ -898,14 +930,114 @@ function cancelBroadcast_(user, id) {
   });
 }
 
+// ---------- archive and delete (campaigns, broadcasts, templates) ----------
+/**
+ * Something with history (donations, messages that went out) is archived, never deleted: it leaves the lists and pickers but
+ * the Queue, contact Messages and campaign totals still show it. Only something without history can be deleted.
+ */
+function donorUsage_(msgs, broadcasts, donations) {
+  var u = { campDonations: {}, campBroadcasts: {}, bcSent: {}, bcWaiting: {}, tplUses: {}, tplWaiting: {} };
+  var inc = function (o, k) { if (k) o[k] = (o[k] || 0) + 1; };
+  (donations || []).forEach(function (x) { inc(u.campDonations, x.campaign_id); });
+  (broadcasts || []).forEach(function (b) { inc(u.campBroadcasts, b.campaign_id); inc(u.tplUses, b.template_id); });
+  (msgs || []).forEach(function (m) {
+    if (m.channel === 'manual') return;
+    var open = DONOR_STATUS_OPEN.indexOf(m.status) >= 0;
+    if (m.broadcast_id) { if (m.wa_sent_at) inc(u.bcSent, m.broadcast_id); if (open) inc(u.bcWaiting, m.broadcast_id); }
+    inc(u.tplUses, m.template_id); if (open) inc(u.tplWaiting, m.template_id);
+  });
+  return u;
+}
+function loadDonorUsage_() { return donorUsage_(loadTable_('DonorMessages'), loadTable_('DonorBroadcasts'), loadTable_('Donations')); }
+
+/** '' when it may be deleted, otherwise why not (in plain words). */
+function campaignDeleteBlock_(c, u) {
+  var d = u.campDonations[c.id] || 0, b = u.campBroadcasts[c.id] || 0;
+  if (!d && !b) return '';
+  return 'It has ' + [d ? d + ' donation' + (d === 1 ? '' : 's') : '', b ? b + ' broadcast' + (b === 1 ? '' : 's') : ''].filter(String).join(' and ') + '. Archive it instead.';
+}
+function broadcastDeleteBlock_(b, u) {
+  if (b.status === 'draft') return '';
+  if (u.bcSent[b.id]) return 'Some of its messages were already sent. Archive it instead.';
+  if (u.bcWaiting[b.id]) return 'It still has messages waiting to go. Cancel the unsent ones first.';
+  return '';
+}
+function templateDeleteBlock_(t, u) {
+  var n = u.tplUses[t.id] || 0;
+  return n ? 'It is used by ' + n + ' message' + (n === 1 ? '' : 's') + ' or broadcast' + (n === 1 ? '' : 's') + '. Archive it instead.' : '';
+}
+
+var DONOR_ARCHIVE_WHAT = { DonorCampaigns: 'Campaign', DonorBroadcasts: 'Broadcast', DonorTemplates: 'Template' };
+
+function setDonorArchived_(user, table, id, on) {
+  if (!DONOR_ARCHIVE_WHAT[table]) throw new ApiError('Not supported.');
+  return withLock_(function () {
+    var row = findOne_(table, 'id', id);
+    if (!row) throw new ApiError(DONOR_ARCHIVE_WHAT[table] + ' not found', null, 404);
+    if (on) {
+      var u = loadDonorUsage_();
+      if (table === 'DonorBroadcasts' && u.bcWaiting[id]) throw new ApiError('This broadcast still has messages waiting to go. Cancel the unsent ones first, then archive it.');
+      if (table === 'DonorTemplates' && u.tplWaiting[id]) throw new ApiError('Messages waiting to go still use this template. Let them go or cancel them first, then archive it.');
+    }
+    row.archived_at = on ? nowIso_() : null;
+    saveRows_(table, [row]);
+    return cleanDonorRow_(row);
+  });
+}
+
+function deleteDonorCampaign_(user, id) {
+  return withLock_(function () {
+    var c = findOne_('DonorCampaigns', 'id', id);
+    if (!c) throw new ApiError('Campaign not found', null, 404);
+    var why = campaignDeleteBlock_(c, loadDonorUsage_());
+    if (why) throw new ApiError('This campaign cannot be deleted. ' + why);
+    deleteRow_('DonorCampaigns', c);
+    return { deleted: 1 };
+  });
+}
+
+/** A draft, or a broadcast none of whose messages ever went out. Its never-sent messages (cancelled, failed, skipped) go with it. */
 function deleteDraftBroadcast_(user, id) {
   return withLock_(function () {
     var b = findOne_('DonorBroadcasts', 'id', id);
     if (!b) throw new ApiError('Not found', null, 404);
-    if (b.status !== 'draft') throw new ApiError('Only drafts can be deleted. Cancel an approved one instead.');
-    deleteRow_('DonorBroadcasts', b);
-    return { deleted: 1 };
+    var why = broadcastDeleteBlock_(b, loadDonorUsage_());
+    if (why) throw new ApiError('This broadcast cannot be deleted. ' + why);
+    var removed = deleteDonorMessageRows_(function (m) { return m.broadcast_id === id && !m.wa_sent_at; });
+    deleteRow_('DonorBroadcasts', b);   // another tab: deleting message rows does not move this row
+    return { deleted: 1, messages_removed: removed };
   });
+}
+
+/** Inside the lock: delete the DonorMessages rows that match (bottom up, runs of rows in one call). */
+function deleteDonorMessageRows_(pred) {
+  var rows = loadTable_('DonorMessages').filter(pred).map(function (m) { return m._row; }).sort(function (a, b) { return b - a; });
+  var sh = sheet_('DonorMessages');
+  for (var i = 0; i < rows.length;) {
+    var j = i;
+    while (j + 1 < rows.length && rows[j + 1] === rows[j] - 1) j++;
+    sh.deleteRows(rows[j], j - i + 1);
+    i = j + 1;
+  }
+  return rows.length;
+}
+
+/** An unused template: deleted in Twilio (so WhatsApp drops it too), then here. Same order as the parent Templates page. */
+function deleteDonorTemplate_(user, id) {
+  var t = findOne_('DonorTemplates', 'id', id);
+  if (!t) throw new ApiError('Template not found', null, 404);
+  var why = templateDeleteBlock_(t, loadDonorUsage_());
+  if (why) throw new ApiError('This template cannot be deleted. ' + why);
+  if (t.twilio_content_sid) {
+    requireConfig_(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']);
+    try { deleteContent_(t.twilio_content_sid); }
+    catch (e) { throw new ApiError('Could not delete it in Twilio: ' + e.message + '. Nothing was deleted; try again.', null, 502); }
+  }
+  withLock_(function () {
+    var fresh = findOne_('DonorTemplates', 'id', id);
+    if (fresh) deleteRow_('DonorTemplates', fresh);
+  });
+  return { deleted: 1 };
 }
 
 // ---------- the message queue ----------
@@ -1092,12 +1224,13 @@ function donorEmailSubject_(m, ctx) {
   return DONOR_EMAIL_SUBJECTS[m.message_type] || 'A message from Ek Tara';
 }
 
-/** The WhatsApp text as an email: *bold* and _italic_ kept, line breaks kept, links clickable. */
-function donorEmailHtml_(text) {
+/** The WhatsApp text as an email: *bold* and _italic_ kept, line breaks kept, links clickable. withImage: the template's image above the text (as on WhatsApp). */
+function donorEmailHtml_(text, withImage) {
   var h = htmlEsc_(text)
     .replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g, '$1<i>$2</i>')
     .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>').replace(/\n/g, '<br>');
-  return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55;color:#1f2a27;max-width:600px">' + h +
+  return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55;color:#1f2a27;max-width:600px">' +
+    (withImage ? '<img src="cid:' + DONOR_EMAIL_IMAGE_CID + '" alt="" style="display:block;max-width:100%;height:auto;border-radius:8px;margin:0 0 16px">' : '') + h +
     '<p style="margin-top:28px;font-size:12px;color:#6b7a75">You are receiving this because you agreed to hear from Ek Tara by email. Reply to this email if you would like us to stop.</p></div>';
 }
 
@@ -1175,7 +1308,10 @@ function claimDonorBatch_(max) {
       e.m.send_claimed_at = nowIso_(); touch(e.m);
       items.push({ id: e.m.id, donor_id: e.d.id, email: !!e.email, owner: !!e.owner, to_email: e.owner ? e.m.to_email : e.d.email, type: e.m.message_type, trigger: e.m.trigger, ref: e.m.ref,
         donor_name: e.d.name, phone: e.d.phone_e164, contentSid: e.tpl && e.tpl.twilio_content_sid, vars: e.vars, owner_name: e.d.owner_name,
-        subject: e.email && !e.owner ? donorEmailSubject_(e.m, ctx) : null, text: e.email && !e.owner ? renderBody_(e.tpl, e.vars) : null });
+        subject: e.email && !e.owner ? donorEmailSubject_(e.m, ctx) : null, text: e.email && !e.owner ? renderBody_(e.tpl, e.vars) : null,
+        // a media template's file (image or PDF) goes with the email too: the Drive file id is the value of its placeholder
+        media_type: e.email && e.tpl && MEDIA_TYPES[e.tpl.media_type] ? e.tpl.media_type : null,
+        media_id: e.email && e.tpl && MEDIA_TYPES[e.tpl.media_type] ? (e.vars || {})[String(mediaVarNumber_(e.tpl))] || null : null });
     });
     saveRows_('DonorMessages', values_(dirty));
     return { items: items, remaining: remaining, email_waiting: emailWaiting };
@@ -1191,13 +1327,40 @@ function sendDonorItems_(items) {
     } catch (e) { out = chunk.map(function () { return { error: 'Unexpected error while sending: ' + e.message }; }); }
     chunk.forEach(function (it, j) { results[it.id] = out[j]; });
   }
+  var files = {};   // each Drive file is downloaded once per batch, however many emails carry it
   items.filter(function (i) { return i.email; }).forEach(function (it) {
     try {
-      MailApp.sendEmail({ to: it.to_email, subject: it.subject, name: DONOR_EMAIL_FROM_NAME, body: it.text, htmlBody: donorEmailHtml_(it.text) });
+      var mail = { to: it.to_email, subject: it.subject, name: DONOR_EMAIL_FROM_NAME, body: it.text, htmlBody: donorEmailHtml_(it.text) };
+      if (it.media_type) {   // a media template: the image shows above the text, a PDF is attached
+        if (!it.media_id) throw new Error('the broadcast has no attachment file');
+        var f = files[it.media_id] || (files[it.media_id] = driveMediaBlob_(it.media_id, it.media_type));
+        if (it.media_type === 'image') { mail.htmlBody = donorEmailHtml_(it.text, true); mail.inlineImages = {}; mail.inlineImages[DONOR_EMAIL_IMAGE_CID] = f; }
+        else mail.attachments = [f];
+      }
+      MailApp.sendEmail(mail);
       results[it.id] = { sid: 'email' };
     } catch (e) { results[it.id] = { error: 'Email failed: ' + e.message }; }
   });
   return results;
+}
+
+/** The content id of the image shown inside a donor email. */
+var DONOR_EMAIL_IMAGE_CID = 'ektaraimage';
+
+/**
+ * A media template's file, downloaded from Google Drive the same way WhatsApp gets it (the file must be shared as "Anyone with the link").
+ * Returns a blob with a sensible file name; throws an Error saying what is wrong, so the email shows as failed (and can be retried).
+ */
+function driveMediaBlob_(id, mediaType) {
+  var kind = MEDIA_TYPES[mediaType];
+  var r = UrlFetchApp.fetch(DRIVE_MEDIA_URL + encodeURIComponent(id), { muteHttpExceptions: true, followRedirects: true });
+  var h = {}, raw = r.getHeaders() || {}; Object.keys(raw).forEach(function (k) { h[k.toLowerCase()] = raw[k]; });
+  var type = String(h['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (r.getResponseCode() !== 200 || type === 'text/html') throw new Error('the ' + kind.label + ' could not be downloaded from Google Drive (is it still shared as "Anyone with the link"?)');
+  if (kind.mimes.indexOf(type) < 0) throw new Error('the attachment must be ' + kind.what + ', this one is ' + (type || 'of an unknown type'));
+  var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(h['content-disposition'] || ''));
+  var name = m ? decodeURIComponent(m[1]) : (mediaType === 'image' ? 'image.' + (type === 'image/png' ? 'png' : 'jpg') : 'attachment.pdf');
+  return r.getBlob().setName(name);
 }
 
 function saveDonorResults_(items, results) {
@@ -1276,22 +1439,34 @@ function donorOptOutChoice_(params, optOut) {
   return donors.length > 0;
 }
 
-/** A free-text reply from a donor: attach it to the message it answers. Returns true if handled. */
+/**
+ * A free-text reply from a donor: saved as its own row (status 'received', type 'reply'), linked to the message it answers
+ * (ref = that message's id; same broadcast, campaign and template). The message that was sent is left as it is.
+ * Each reply is kept, and the same WhatsApp message (MessageSid) is saved only once, as this can run twice (webhook, then recovery).
+ * A received row is never picked up by the sender, never counts as "sent", and does not change "Last communicated".
+ * Returns true if handled.
+ */
 function handleDonorReply_(params, eventId) {
-  var m = null;
+  var m = null, donor = null;
   if (params.OriginalRepliedMessageSid) m = findOne_('DonorMessages', 'wa_sid', params.OriginalRepliedMessageSid);
+  if (m) donor = findOne_('Donors', 'id', m.donor_id);
+  if (!donor) donor = findOne_('Donors', 'phone_e164', phoneOf_(params));
+  if (!donor) return false;
   if (!m) {
-    var donor = findOne_('Donors', 'phone_e164', phoneOf_(params));
-    if (!donor) return false;
     var since = Date.now() - REPLY_WINDOW_MS;
     var open = findBy_('DonorMessages', 'donor_id', donor.id).filter(function (x) { return x.wa_sent_at && Date.parse(x.wa_sent_at) >= since && x.channel === 'whatsapp'; })
       .sort(function (a, b) { return String(b.wa_sent_at).localeCompare(String(a.wa_sent_at)); });
-    m = open[0] || null;
+    m = open[0] || null;   // none: still kept, as a reply that answers no message in particular
   }
-  if (!m) return !!findOne_('Donors', 'phone_e164', phoneOf_(params));
-  if (eventId) setEventMessageId_(eventId, m.id);
+  if (eventId && m) setEventMessageId_(eventId, m.id);
   var text = String(params.Body || '').trim();
-  if (text) { m.reply_text = text.slice(0, MAX_REPLY_LENGTH); m.replied_at = nowIso_(); m.updated_at = nowIso_(); saveRows_('DonorMessages', [m]); }
+  if (!text) return true;
+  var key = params.MessageSid ? 'R:' + params.MessageSid : null;
+  if (key && findOne_('DonorMessages', 'dedupe_key', key)) return true;   // already saved
+  var now = nowIso_();
+  insertRows_('DonorMessages', [newDonorMessage_({ donor_id: donor.id, channel: 'whatsapp', status: 'received', message_type: 'reply', trigger: null,
+    broadcast_id: m ? m.broadcast_id : null, campaign_id: m ? m.campaign_id : null, template_id: m ? m.template_id : null, ref: m ? m.id : null,
+    reply_text: text.slice(0, MAX_REPLY_LENGTH), replied_at: now, dedupe_key: key, expires_at: null, created_at: now, updated_at: now })]);
   return true;
 }
 
@@ -1422,7 +1597,7 @@ function pickTemplate_(msg, donor, templates) {
   var best = null, bestScore = -1, lang = String(donor.language || 'en').toLowerCase();
   Object.keys(templates).forEach(function (id) {
     var t = templates[id];
-    if (t.status !== 'approved' || t.message_type !== msg.message_type) return;
+    if (t.status !== 'approved' || t.archived_at || t.message_type !== msg.message_type) return;
     var score = 0;
     if (String(t.language).toLowerCase().slice(0, 2) === lang.slice(0, 2)) score += 2;
     if (msg.message_type === 'welcome') {
