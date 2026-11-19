@@ -913,11 +913,19 @@ function listDonorMessages_(user, f) {
   f = f || {};
   var donors = {}; loadTable_('Donors').forEach(function (d) { donors[d.id] = d; });
   var tpls = {}; loadTable_('DonorTemplates').forEach(function (t) { tpls[t.id] = t; });
-  var rows = loadTable_('DonorMessages').filter(function (m) { return m.status && m.channel !== 'manual' && (!f.status || m.status === f.status); })   // logged conversations are not in the queue; a row without a status is a cleared leftover
-    .sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); }).slice(0, 1000);   // the page shows them in pages
+  var camps = {}; loadTable_('DonorCampaigns').forEach(function (c) { camps[c.id] = c; });
+  var bcs = {}; loadTable_('DonorBroadcasts').forEach(function (b) { bcs[b.id] = b; });
+  var rows = loadTable_('DonorMessages').filter(function (m) {   // logged conversations are not in the queue; a row without a status is a cleared leftover
+    return m.status && m.channel !== 'manual' && (!f.status || m.status === f.status) && (!f.broadcast_id || m.broadcast_id === f.broadcast_id);
+  }).sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); });
+  if (!f.broadcast_id) rows = rows.slice(0, 1000);   // the Queue: the newest 1000 (shown in pages). One broadcast's messages: all of them
   return rows.map(function (m) {
     var o = cleanDonorRow_(m), d = donors[m.donor_id] || {};
     o.donor_name = d.name || '(deleted)'; o.donor_segment = d.segment || ''; o.template_name = m.template_id && tpls[m.template_id] ? tpls[m.template_id].name : null;
+    // the broadcast it came from, and its campaign (the message's own campaign, else the broadcast's)
+    var bc = m.broadcast_id ? bcs[m.broadcast_id] : null, campId = m.campaign_id || (bc && bc.campaign_id);
+    o.broadcast_name = bc ? (bc.name || '(unnamed broadcast)') : null;
+    o.campaign_name = campId && camps[campId] ? camps[campId].name : null;
     return o;
   });
 }

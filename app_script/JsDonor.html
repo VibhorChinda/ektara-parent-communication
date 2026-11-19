@@ -423,6 +423,37 @@ function donorTemplateMeta(t) {
 const dCount = (shown, total, word) => '<span class="small muted" id="cnt" aria-live="polite" style="flex:0 0 auto;padding-bottom:10px;white-space:nowrap">' + (shown === total ? total : shown + ' of ' + total) + ' ' + word + (total === 1 ? '' : 's') + '</span>';
 const dBcStatus = b => badge(b.status === 'draft' ? 'held' : b.status === 'approved' ? 'approved' : 'cancelled').replace(/>[^<]*<\/span>$/, '>' + (b.status === 'draft' ? 'Needs approval' : label(b.status)) + '</span>');
 const dBcProgress = b => b.status === 'draft' ? '\u2014' : b.counts.sent + ' sent, ' + b.counts.waiting + ' waiting' + (b.counts.failed ? ', ' + b.counts.failed + ' failed' : '');
+/** Every message one broadcast created: who, by which channel, status, when it went, and any error or reply. */
+const D_MSG_GROUPS = [['all', 'All', null], ['sent', 'Sent', ['sent', 'delivered', 'read']], ['waiting', 'Waiting', ['queued', 'held', 'awaiting_confirmation']], ['failed', 'Failed', ['failed']]];
+async function broadcastMessages(b) {
+  const m = modal('<h2>' + esc(b.name) + ': messages</h2><p class="small muted" style="margin-top:0">' + esc(b.template_name || 'no template') + (b.campaign_name ? ' · ' + esc(b.campaign_name) : '') + (b.approved_by ? ' · approved by ' + esc(b.approved_by) + ', ' + esc(fmtDate(b.approved_at)) : '') + '</p>' +
+    '<div id="bm"><div class="sk-top">' + stringSvg('sm') + '<span>Loading messages…</span></div></div><div class="actions"><button class="btn" id="oq">Open in Queue</button><button class="btn primary" id="x">Close</button></div>', true);
+  $('#x', m).onclick = m.close;
+  $('#oq', m).onclick = () => { window.__qq = b.name; m.close(); go('donor/queue'); };
+  let rows;
+  try { rows = await call('donor.messages.list', { broadcast_id: b.id }); } catch (e) { $('#bm', m).innerHTML = errorsHtml(e); return; }
+  const known = [].concat(...D_MSG_GROUPS.map(g => g[2] || []));
+  const groupOf = r => (D_MSG_GROUPS.find(g => g[2] && g[2].indexOf(r.status) >= 0) || ['other'])[0];
+  const groups = D_MSG_GROUPS.concat(rows.some(r => known.indexOf(r.status) < 0) ? [['other', 'Other', null]] : []);   // cancelled, skipped ...
+  const f = { g: 'all', q: '' };
+  function draw() {
+    const q = f.q.trim().toLowerCase();
+    const list = rows.filter(r => (f.g === 'all' || groupOf(r) === f.g) && (!q || String(r.donor_name || '').toLowerCase().indexOf(q) >= 0));
+    const n = k => k === 'all' ? rows.length : rows.filter(r => groupOf(r) === k).length;
+    $('#bm', m).innerHTML = '<div class="chips" style="margin-top:0">' + groups.map(g => '<span class="chip' + (f.g === g[0] ? ' on' : '') + '" data-bg="' + g[0] + '" tabindex="0" role="button" aria-pressed="' + (f.g === g[0]) + '">' + g[1] + ' (' + n(g[0]) + ')</span>').join('') + '</div>' +
+      fld('Search', '<input id="bmq" type="search" value="' + esc(f.q) + '" placeholder="Contact name">') +
+      (list.length ? '<div class="d-msg-list" style="max-height:420px;margin-top:10px"><table><thead><tr><th>Contact</th><th>Channel</th><th>Status</th><th>Sent at</th><th>Details</th></tr></thead><tbody>' + list.map(r =>
+        '<tr><td>' + esc(r.donor_name) + ' ' + segTag(r.donor_segment) + '</td><td class="small">' + esc(dChannel(r)) + '</td>' +
+        '<td>' + dBadge(r.status) + '<div class="small muted" title="' + esc(fmtDate(r.updated_at)) + '">' + esc(r.updated_at ? timeAgo(r.updated_at) : '') + '</div></td>' +
+        '<td class="small">' + (r.wa_sent_at ? esc(fmtDate(r.wa_sent_at)) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="small muted">' + esc(r.hold_reason || r.wa_error || (r.status === 'queued' && r.not_before && Date.parse(r.not_before) > Date.now() ? 'Scheduled for ' + fmtDate(r.not_before) : '')) + (r.reply_text ? '<br>“' + esc(r.reply_text) + '”' : '') + '</td></tr>').join('') + '</tbody></table></div>'
+        : '<p class="muted">' + (rows.length ? 'No messages match.' : 'This broadcast has no messages.') + '</p>');
+    $$('[data-bg]', m).forEach(c => { c.onclick = () => { f.g = c.dataset.bg; draw(); }; c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); } }; });
+    $('#bmq', m).oninput = e => { f.q = e.target.value; const pos = e.target.selectionStart; draw(); const i = $('#bmq', m); i.focus(); i.setSelectionRange(pos, pos); };
+  }
+  draw();
+}
+
 views['donor/broadcasts'] = async function () {
   await dmeta();
   const all = await call('donor.broadcasts.list');
@@ -438,7 +469,7 @@ views['donor/broadcasts'] = async function () {
       (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="bq" type="search" value="' + esc(f.q) + '" placeholder="Broadcast name, campaign or status (e.g. needs approval, approved, cancelled)">') + dCount(list.length, all.length, 'broadcast') + '</div></div>' : '') +
       (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Campaign</th><th>Trigger</th><th>Send on</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>' + shown.map(b =>
         '<tr><td><b>' + esc(b.name) + '</b><div class="small muted">' + esc(b.template_name || 'no template yet') + '</div></td><td class="small">' + esc(b.campaign_name || '') + '</td><td>' + dTrig(b.trigger) + '</td><td>' + esc(b.send_on || '') + '</td><td>' + dBcStatus(b) + '</td>' +
-        '<td class="small">' + dBcProgress(b) + '</td>' +
+        '<td class="small">' + dBcProgress(b) + (b.counts.total ? '<div style="margin-top:4px"><button class="btn small" data-msgs="' + b.id + '" title="See every message this broadcast created">View messages (' + b.counts.total + ')</button></div>' : '') + '</td>' +
         '<td style="white-space:nowrap">' + (b.status === 'draft' ? '<button class="btn small primary" data-r="' + b.id + '">Review &amp; approve</button> <button class="btn small danger" data-del="' + b.id + '">Delete</button>' : b.status === 'approved' ? '<button class="btn small danger" data-c="' + b.id + '">Cancel unsent</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
         // footer: rows per page and page n / total (same as the Contacts page)
         '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '\u2013' + (from + shown.length) + ' of ' + list.length + '</span>' +
@@ -451,6 +482,7 @@ views['donor/broadcasts'] = async function () {
     if ($('#pnext')) $('#pnext').onclick = () => { f.page++; draw(); };
     $('#new').onclick = () => broadcastForm({ kind: 'special_update', segments: [], values: {} });
     $$('[data-r]').forEach(x => x.onclick = () => broadcastForm(all.find(y => y.id === x.dataset.r)));
+    $$('[data-msgs]').forEach(x => x.onclick = () => broadcastMessages(all.find(y => y.id === x.dataset.msgs)));
     $$('[data-del]').forEach(x => x.onclick = async () => { if (confirm('Delete this draft?')) { try { await call('donor.broadcasts.delete', x.dataset.del); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
     $$('[data-c]').forEach(x => x.onclick = async () => { if (confirm('Cancel the messages that have not been sent yet?')) { try { const r = await call('donor.broadcasts.cancel', x.dataset.c); toast(r.cancelled + ' cancelled'); views['donor/broadcasts'](); } catch (e) { toast(e.message, true); } } });
   }
@@ -560,18 +592,19 @@ async function broadcastForm(b) {
 views['donor/queue'] = async function () {
   await dmeta();
   let size = 20; try { size = Number(localStorage.getItem('ektara-queue-size')) || 20; } catch (e) { /* storage can be blocked */ }
-  const f = { q: '', page: 1, size: [10, 20, 50, 100].indexOf(size) >= 0 ? size : 20 };
+  const f = { q: window.__qq || '', page: 1, size: [10, 20, 50, 100].indexOf(size) >= 0 ? size : 20 }; window.__qq = '';   // a search handed over by a broadcast's messages window, used once
   const all = await call('donor.messages.list', {});
-  // search by contact name or status (the label shown, e.g. "Awaiting trustee", or the plain status, e.g. "held")
-  const matches = m => { const q = f.q.trim().toLowerCase(); return !q || [m.donor_name, m.status, label(m.status)].some(x => String(x || '').toLowerCase().indexOf(q) >= 0); };
+  // search by contact name, campaign, broadcast or status (the label shown, e.g. "Awaiting trustee", or the plain status, e.g. "held")
+  const matches = m => { const q = f.q.trim().toLowerCase(); return !q || [m.donor_name, m.campaign_name, m.broadcast_name, m.status, label(m.status)].some(x => String(x || '').toLowerCase().indexOf(q) >= 0); };
+  const orDash = v => v ? esc(v) : '<span class="muted">—</span>';
   function draw() {
     const list = all.filter(matches);
     const pages = Math.max(1, Math.ceil(list.length / f.size)); f.page = Math.min(Math.max(1, f.page), pages);
     const from = (f.page - 1) * f.size, shown = list.slice(from, from + f.size);
     main().innerHTML = '<div class="head"><div><h1>Queue</h1><p class="sub" style="margin:0">Every donor message and why it is waiting. Each message goes by WhatsApp and/or email, as the donor opted in. Only contacts who opted in to that channel get it.</p></div><button class="btn primary" id="go">Send waiting messages now</button></div>' +
-      (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="qq" type="search" value="' + esc(f.q) + '" placeholder="Contact name or status (e.g. queued, held, sent, failed, cancelled)">') + dCount(list.length, all.length, 'message') + '</div><p class="small muted" style="margin:6px 0 0">The newest 1000 messages.</p></div>' : '') +
-      '<div class="card scroll">' + (list.length ? '<table><thead><tr><th>Contact</th><th>Message</th><th>Status</th><th>Why / details</th><th>Updated</th><th></th></tr></thead><tbody>' + shown.map(m =>
-        '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(String(m.message_type || '').replace(/_/g, ' ')) + '<div class="muted">' + dTrig(m.trigger) + ' · ' + esc(dChannel(m)) + '</div></td><td>' + dBadge(m.status) + '</td>' +
+      (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="qq" type="search" value="' + esc(f.q) + '" placeholder="Contact, campaign, broadcast or status (e.g. queued, held, sent, failed)">') + dCount(list.length, all.length, 'message') + '</div><p class="small muted" style="margin:6px 0 0">The newest 1000 messages.</p></div>' : '') +
+      '<div class="card scroll">' + (list.length ? '<table><thead><tr><th>Contact</th><th>Message</th><th>Campaign</th><th>Broadcast</th><th>Status</th><th>Why / details</th><th>Updated</th><th></th></tr></thead><tbody>' + shown.map(m =>
+        '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(String(m.message_type || '').replace(/_/g, ' ')) + '<div class="muted">' + dTrig(m.trigger) + ' · ' + esc(dChannel(m)) + '</div></td><td class="small">' + orDash(m.campaign_name) + '</td><td class="small">' + orDash(m.broadcast_name) + '</td><td>' + dBadge(m.status) + '</td>' +
         '<td class="small muted">' + esc(m.hold_reason || m.wa_error || (m.status === 'queued' && m.not_before && Date.parse(m.not_before) > Date.now() ? 'Scheduled for ' + fmtDate(m.not_before) : '')) + (m.reply_text ? '<br>“' + esc(m.reply_text) + '”' : '') + '</td><td class="small muted">' + esc(timeAgo(m.updated_at)) + '</td>' +
         '<td style="white-space:nowrap">' + (['queued', 'held', 'awaiting_confirmation'].indexOf(m.status) >= 0 ? '<button class="btn small" data-c="' + m.id + '">Cancel</button>' : m.status === 'failed' ? '<button class="btn small" data-rt="' + m.id + '">Retry</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
         // footer: rows per page and page n / total (same as the Contacts page)
