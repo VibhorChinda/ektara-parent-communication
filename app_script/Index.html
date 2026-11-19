@@ -1356,6 +1356,8 @@ function bindTagEditor(root) {
   call('donor.tags').then(t => { const dl = $('#d-taglist', root); if (dl) dl.innerHTML = t.all.map(x => '<option value="' + esc(x) + '">').join(''); }).catch(() => {});
 }
 const dToday = () => { const t = new Date(); return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0'); };
+/** A status badge that copes with an empty status (donor screens). */
+const dBadge = s => s ? badge(s) : '<span class="badge b-cancelled">Unknown</span>';
 const dActive = d => String((d && d.contact_status) || 'ACTIVE').toUpperCase() !== 'INACTIVE';
 const dChannel = g => g.channel !== 'email' ? 'WhatsApp' : g.message_type === 'report_reminder' ? 'Email to owner' : 'Email' + (g.to_email ? ' to ' + g.to_email : '');
 const D_ICON_EDIT = svgi('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>');
@@ -1386,7 +1388,10 @@ views['donor/home'] = async function () {
   const d = await call('donor.home');
   if (!d.ready) {
     main().innerHTML = '<div class="head"><div><h1>Donor Communication</h1><p class="sub">One step before you can start.</p></div></div><div class="alert info"><b>' + esc(d.message) + '</b>' + (d.problem ? '<br>' + esc(d.problem) : '') + (d.build_problem ? '<br><b>Some files in the project are out of date:</b> ' + esc(d.build_problem) + '. Replace every file from the latest zip.' : '') + '</div>' +
-      '<div class="card">' + (d.can_setup ? '<p style="margin-top:0">You are the project owner, so you can do this now. It creates the donor Google Sheet and its tabs and moves any older donor data into it. It is safe to run again.</p><button class="btn primary" id="setupnow">Set up now</button>'
+      '<div class="card">' + (d.layout
+        ? '<p style="margin-top:0">The app reads each column by its position, so nothing is read or saved until the columns are back in this order. Move whole columns (with their data) in the donor Google Sheet, then reload this page. Extra columns of your own may go to the right of these.</p>' +
+          d.expected.map(t => '<details class="d-msgs"><summary>' + esc(t.tab) + ' <span class="muted small">(' + t.columns.length + ' columns)</span></summary><p class="small" style="margin:6px 0 0">' + t.columns.map((c, i) => '<b>' + (i + 1) + '</b> ' + esc(c)).join(' · ') + '</p></details>').join('')
+      : d.can_setup ? '<p style="margin-top:0">You are the project owner, so you can do this now. It creates the donor Google Sheet and its tabs and moves any older donor data into it. It is safe to run again.</p><button class="btn primary" id="setupnow">Set up now</button>'
         : '<p style="margin:0">Only the project owner can do this. Ask them to open this screen and click <b>Set up now</b>, or to run <b>setup</b> in the Apps Script editor.</p>') + '</div>';
     const sb = $('#setupnow'); if (sb) sb.onclick = async () => { try { await call('admin.setup'); state.dmeta = null; toast('Setup finished'); views['donor/home'](); } catch (e) { toast(e.message, true); } };
     return;
@@ -1401,20 +1406,8 @@ views['donor/home'] = async function () {
     (q.failed ? '<p><span class="badge b-failed">' + q.failed + ' failed</span> <a href="#" data-go="donor/queue">Retry</a></p>' : '') +
     (d.missing_templates.length ? '<p class="muted">No approved template yet for: ' + d.missing_templates.map(esc).join(', ') + '. <a href="#" data-go="donor/templates">Templates</a></p>' : '') +
     (!d.drafts.length && !q.held && !q.failed ? '<p class="muted">Nothing needs attention.</p>' : '') + '</div>' +
-    '<p class="small muted">Sent in the last 7 days: ' + q.sent_7d + ' \u00b7 waiting: ' + q.queued + '</p>' +
-    (d.is_owner ? '<div class="card"><h2>Donor sheet</h2><p class="small muted" style="margin-top:0">Keep only the columns the app uses, in its order. Every other column in the donor Google Sheet is deleted with its data, including columns your team added. A backup copy of the whole file is made first.</p><button class="btn" id="tidy">Tidy sheet columns</button></div>' : '');
+    '<p class="small muted">Sent in the last 7 days: ' + q.sent_7d + ' \u00b7 waiting: ' + q.queued + '</p>';
   $('#sendnow').onclick = async () => { const n = await driveDonorSend(); toast(n + ' messages sent'); views['donor/home'](); };
-  if ($('#tidy')) $('#tidy').onclick = () => {
-    const m = modal('<h2>Tidy the donor sheet?</h2><p>Every tab of the donor Google Sheet will keep only the columns the app uses, in the app\u2019s order. <b>Any other column is deleted with its data</b>, including columns your team added.</p><p class="small muted">A backup copy of the whole file is saved in your Drive first. If the copy cannot be made, nothing is changed. Avoid sending broadcasts while it runs.</p><div id="terr"></div><div class="actions"><button class="btn" id="no">Cancel</button><button class="btn danger" id="yes">Tidy sheet columns</button></div>');
-    $('#no', m).onclick = m.close;
-    $('#yes', m).onclick = async () => {
-      try {
-        const r = await call('donor.tidySheets'); m.close();
-        const w = modal('<h2>Donor sheet tidied</h2><ul class="tl">' + r.report.map(l => '<li class="small">' + esc(l) + '</li>').join('') + '</ul><p class="small muted">Backup: <a href="' + esc(r.backup_url) + '" target="_blank" rel="noopener">' + esc(r.backup_name) + '</a>. Delete it from Drive once you have checked the sheet.</p><div class="actions"><button class="btn primary" id="x">OK</button></div>');
-        $('#x', w).onclick = w.close;
-      } catch (e) { $('#terr', m).innerHTML = errorsHtml(e); }
-    };
-  };
   $$('[data-seg]').forEach(t => t.onclick = () => { state.donorFilter = { segment: t.dataset.seg }; go('donor/donors'); });
   $$('[data-d]').forEach(t => t.onclick = () => donorModal(t.dataset.d));
 };
@@ -1519,7 +1512,7 @@ async function donorModal(id, open) {   // open: 'donations' to reopen with that
     '<details class="d-msgs"' + (open === 'donations' ? ' open' : '') + '><summary>Donations <span class="muted small">(' + x.donations.length + ')</span></summary>' + (x.donations.length ? '<ul class="tl d-msg-list">' + x.donations.map(n => '<li style="display:flex;gap:8px;align-items:center"><span style="flex:1">' + esc(inrFmt(n.amount)) + ' on ' + esc(n.donated_on) + (n.campaign_name ? ' \u00b7 ' + esc(n.campaign_name) : '') + (n.note ? ' <span class="muted small">' + esc(n.note) + '</span>' : '') + '</span><button class="btn small" data-ed="' + n.id + '">Edit</button><button class="btn small danger" data-dd="' + n.id + '">Delete</button></li>').join('') + '</ul>' : '<p class="muted small">None recorded.</p>') + '</details>' +
     '<details class="d-msgs"' + (open === 'messages' ? ' open' : '') + '><summary>Messages <span class="muted small">(recent 10 communications' + (x.message_count > x.messages.length ? ' of ' + x.message_count : '') + ')</span></summary>' +
     '<div style="margin:6px 0 8px"><button class="btn small" id="logc">+ Log a call or conversation</button></div>' +
-    (x.messages.length ? '<ul class="tl d-msg-list">' + x.messages.map(g => g.channel === 'manual' ? dLogLi(g) : '<li>' + badge(g.status) + ' ' + esc(g.message_type.replace(/_/g, ' ')) + ' <span class="muted small">' + esc(dChannel(g)) + ' \u00b7 ' + dTrig(g.trigger) + ' \u00b7 ' + esc(timeAgo(g.updated_at)) + (g.hold_reason ? ' \u00b7 ' + esc(g.hold_reason) : '') + (g.wa_error ? ' \u00b7 ' + esc(g.wa_error) : '') + '</span>' + (g.reply_text ? '<br><span class="small muted">\u201c' + esc(g.reply_text) + '\u201d</span>' : '') + '</li>').join('') + '</ul>' : '<p class="muted small">None yet.</p>') + '</details>' +
+    (x.messages.length ? '<ul class="tl d-msg-list">' + x.messages.map(g => g.channel === 'manual' ? dLogLi(g) : '<li>' + dBadge(g.status) + ' ' + esc(String(g.message_type || '').replace(/_/g, ' ')) + ' <span class="muted small">' + esc(dChannel(g)) + ' \u00b7 ' + dTrig(g.trigger) + ' \u00b7 ' + esc(g.updated_at ? timeAgo(g.updated_at) : '') + (g.hold_reason ? ' \u00b7 ' + esc(g.hold_reason) : '') + (g.wa_error ? ' \u00b7 ' + esc(g.wa_error) : '') + '</span>' + (g.reply_text ? '<br><span class="small muted">\u201c' + esc(g.reply_text) + '\u201d</span>' : '') + '</li>').join('') + '</ul>' : '<p class="muted small">None yet.</p>') + '</details>' +
     '<h2 style="margin-top:12px">Details</h2>' + donorFormHtml(d) + '<div id="ferr"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn primary" id="s">Save details</button></div>', true);
   bindTagEditor(m);
   const done = msg => { toast(msg); m.close(); go('donor/donors'); };
@@ -1596,7 +1589,7 @@ async function donationForm(d, parentModal, ex) {
 views['donor/campaigns'] = async function () {
   const [all, bcs] = await Promise.all([call('donor.campaigns.list'), call('donor.broadcasts.list')]);
   const f = { q: '' };
-  const cStatus = c => label(c.status.replace('_', ' '));
+  const cStatus = c => label(String(c.status || 'planned').replace('_', ' '));   // a blank status counts as planned
   const matches = c => { const q = f.q.trim().toLowerCase(); return !q || [c.name, cStatus(c), c.status].some(v => String(v || '').toLowerCase().indexOf(q) >= 0); };
   const byCamp = {}; bcs.forEach(b => { if (b.campaign_id) (byCamp[b.campaign_id] = byCamp[b.campaign_id] || []).push(b); });
   const bcCell = c => { const l = byCamp[c.id] || [], dr = l.filter(b => b.status === 'draft').length;
@@ -1663,7 +1656,7 @@ views['donor/templates'] = async function () {
   main().innerHTML = '<div class="head"><div><h1>Templates</h1><p class="sub" style="margin:0">Each message type is a WhatsApp template Meta approves once. Placeholder labels such as donor_name or campaign_result fill themselves in.</p></div>' +
     '<div class="row" style="flex:0 0 auto"><button class="btn" id="imp">Import from Twilio</button><button class="btn" id="sync">Check status now</button><button class="btn primary" id="new">Request template</button></div></div>' +
     (list.length ? '<div class="card scroll"><table><thead><tr><th>Name</th><th>Type</th><th>Lang</th><th>Status</th><th>Message</th><th></th></tr></thead><tbody>' + shown.map(t =>
-      '<tr><td><b>' + esc(t.name) + '</b></td><td class="small">' + esc(state.dmeta.message_types[t.message_type] || '(not set)') + (t.source_code ? ' \u00b7 ' + esc(t.source_code) : '') + '</td><td>' + esc(t.language) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
+      '<tr><td><b>' + esc(t.name) + '</b>' + dMediaChip(t) + '</td><td class="small">' + esc(state.dmeta.message_types[t.message_type] || '(not set)') + (t.source_code ? ' \u00b7 ' + esc(t.source_code) : '') + '</td><td>' + esc(t.language) + '</td><td>' + badge(t.status) + metaNote(t) + (t.rejection_reason ? '<div class="small" style="color:var(--bad)">' + esc(t.rejection_reason) + '</div>' : '') + '</td>' +
       '<td class="small" style="max-width:340px">' + esc(t.body) + '<div class="muted">Labels: ' + esc((t.variable_names || []).join(', ')) + '</div></td><td style="white-space:nowrap"><button class="btn small" data-e="' + t.id + '">Type &amp; labels</button>' + (t.status === 'draft' ? ' <button class="btn small" data-retry="' + t.id + '">Retry submit</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
       // footer: rows per page and page n / total (same as the Contacts page)
       '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '\u2013' + (from + shown.length) + ' of ' + list.length + '</span>' +
@@ -1684,17 +1677,26 @@ function labelInputs(ph, names, samples, withSamples) {
   const auto = state.dmeta.auto_labels;
   return '<datalist id="labels">' + auto.map(a => '<option>' + a + '</option>').join('') + '</datalist>' + ph.map(n => '<div class="row" style="margin-bottom:6px"><input data-n="' + n + '" list="labels" value="' + esc(names[n - 1] || '') + '" placeholder="Label for {{' + n + '}}: pick one that fills itself, or type your own">' + (withSamples ? '<input data-s="' + n + '" value="' + esc((samples || {})[n] || '') + '" placeholder="Sample value for {{' + n + '}}">' : '') + '</div>').join('');
 }
+/** "Image" / "PDF" next to a media template's name. */
+const dMediaChip = t => t && t.media_type ? ' <span class="d-chip sm" title="Sends ' + (t.media_type === 'document' ? 'a PDF' : 'an image') + ' with the message">' + (t.media_type === 'document' ? '\ud83d\udcc4 PDF' : '\ud83d\uddbc Image') + '</span>' : '';
 function donorTemplateForm() {
-  const s = { body: 'Dear {{1}}, thank you for supporting Ek Tara. Your gift of {{2}} will help children learn. We are grateful.', names: ['donor_name', 'amount'], samples: { 1: 'Asha', 2: '\u20b95,000' } };
+  const s = { body: 'Dear {{1}}, here is an update from Ek Tara: {{2}} Thank you for standing with us.', names: ['donor_name', 'message'], samples: { 1: 'Asha', 2: 'Our new classroom is ready.' } };
   const m = modal('<h2>Request donor template</h2><div class="grid2">' + fld('Name (lowercase, digits, underscores; donor_ is added)', '<input id="t-name" placeholder="donor_thank_you_en">') + fld('Language', languageSelect('t-lang', 'en')) +
-    fld('Message type', '<select id="t-type">' + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === 'thank_you')).join('') + '</select>') + fld('Welcome only: written for source', '<select id="t-src">' + opt('', 'Any source', true) + opt('P1', 'P1 trustee lead', false) + opt('P2', 'P2 website lead', false) + opt('P3', 'P3 referral lead', false) + '</select>') + '</div>' +
-    fld('Category', '<select id="t-cat">' + opt('UTILITY', 'Utility', true) + opt('MARKETING', 'Marketing', false) + '</select>') + fld('Message body', '<textarea id="t-body">' + esc(s.body) + '</textarea>') +
-    '<p class="small muted">Use {{1}}, {{2}} \u2026 Don\u2019t start or end with a placeholder. Photos are not supported yet; put a link in a placeholder.</p><div id="vars"></div><div id="terr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Submit to WhatsApp</button></div>', true);
+    fld('Message type', '<select id="t-type">' + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === 'special_update')).join('') + '</select>') + fld('Welcome only: written for source', '<select id="t-src">' + opt('', 'Any source', true) + opt('P1', 'P1 trustee lead', false) + opt('P2', 'P2 website lead', false) + opt('P3', 'P3 referral lead', false) + '</select>') + '</div>' +
+    '<div class="grid2">' + fld('Category', '<select id="t-cat">' + opt('UTILITY', 'Utility', false) + opt('MARKETING', 'Marketing (updates, greetings, appeals)', true) + '</select>') +
+    fld('Attachment', '<select id="t-media">' + opt('', 'None (text only)', true) + opt('image', 'Image (PNG or JPG, up to 5 MB)', false) + opt('document', 'PDF document (up to 16 MB)', false) + '</select>') + '</div>' +
+    '<div id="t-mbox" hidden>' + fld('Sample file (Google Drive share link) <span class="d-req" aria-hidden="true">*</span>', '<input id="t-msample" placeholder="https://drive.google.com/file/d/\u2026/view?usp=sharing">') +
+    '<p class="small muted" style="margin:4px 0 0">WhatsApp reviews this file. In Drive, share it as <b>Anyone with the link</b> (Viewer). Each broadcast can then attach a different file of the same kind. Excel files cannot be WhatsApp attachments.</p></div>' +
+    fld('Message body', '<textarea id="t-body">' + esc(s.body) + '</textarea>') +
+    '<p class="small muted">Use {{1}}, {{2}} \u2026 Don\u2019t start or end with a placeholder. A placeholder value is one paragraph (no line breaks).</p><div id="vars"></div><div id="terr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Submit to WhatsApp</button></div>', true);
+  $('#t-media', m).onchange = e => { $('#t-mbox', m).hidden = !e.target.value; };
   const vars = () => { const ph = placeholders(s.body); $('#vars', m).innerHTML = ph.length ? '<label>Placeholders</label>' + labelInputs(ph, s.names, s.samples, true) : ''; $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $$('[data-s]', m).forEach(i => i.oninput = () => { s.samples[i.dataset.s] = i.value; }); };
   vars(); $('#t-body', m).oninput = e => { s.body = e.target.value; vars(); }; $('#x', m).onclick = m.close;
   $('#s', m).onclick = async e => {
-    e.target.disabled = true; const ph = placeholders(s.body);
-    try { await call('donor.templates.create', { name: (n => /^donor_/.test(n) ? n : 'donor_' + n)(val('t-name').trim()), language: val('t-lang').trim(), message_type: val('t-type'), source_code: val('t-type') === 'welcome' ? val('t-src') : '', category: val('t-cat'), body: s.body, variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}) }); toast('Submitted. Status: pending Meta'); m.close(); views['donor/templates'](); }
+    const ph = placeholders(s.body), media = val('t-media');
+    if (media && !val('t-msample').trim()) { $('#terr', m).innerHTML = '<div class="alert">Paste the Google Drive share link of the sample ' + (media === 'document' ? 'PDF' : 'image') + '.</div>'; $('#t-msample', m).focus(); return; }
+    e.target.disabled = true;
+    try { await call('donor.templates.create', { name: (n => /^donor_/.test(n) ? n : 'donor_' + n)(val('t-name').trim()), language: val('t-lang').trim(), message_type: val('t-type'), source_code: val('t-type') === 'welcome' ? val('t-src') : '', category: val('t-cat'), body: s.body, variable_names: ph.map(n => s.names[n - 1] || ''), sample_values: ph.reduce((o, n) => { o[String(n)] = s.samples[n] || ''; return o; }, {}), media_type: media, media_sample: val('t-msample').trim() }); toast('Submitted. Status: pending Meta'); m.close(); views['donor/templates'](); }
     catch (err) { $('#terr', m).innerHTML = errorsListHtml(err); e.target.disabled = false; }
   };
 }
@@ -1702,10 +1704,12 @@ function donorTemplateMeta(t) {
   const s = { names: (t.variable_names || []).slice() }, ph = placeholders(t.body);
   const m = modal('<h2>' + esc(t.name) + '</h2><p class="small muted">This only changes how the app uses the template. Nothing is sent to Twilio or WhatsApp.</p><div class="grid2">' +
     fld('Message type', '<select id="m-type">' + opt('', 'Choose\u2026', !t.message_type) + Object.keys(state.dmeta.message_types).map(k => opt(k, state.dmeta.message_types[k], k === t.message_type)).join('') + '</select>') +
-    fld('Welcome only: written for source', '<select id="m-src">' + opt('', 'Any source', !t.source_code) + opt('P1', 'P1 trustee lead', t.source_code === 'P1') + opt('P2', 'P2 website lead', t.source_code === 'P2') + opt('P3', 'P3 referral lead', t.source_code === 'P3') + '</select>') + '</div>' +
-    '<div class="card" style="margin:10px 0">' + esc(t.body) + '</div><label>Placeholder labels</label><div id="vars">' + labelInputs(ph, s.names, null, false) + '</div><div id="merr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
+    fld('Welcome only: written for source', '<select id="m-src">' + opt('', 'Any source', !t.source_code) + opt('P1', 'P1 trustee lead', t.source_code === 'P1') + opt('P2', 'P2 website lead', t.source_code === 'P2') + opt('P3', 'P3 referral lead', t.source_code === 'P3') + '</select>') +
+    (t.media_type ? fld('Attachment', '<select id="m-media">' + opt('image', 'Image (PNG or JPG)', t.media_type === 'image') + opt('document', 'PDF document', t.media_type === 'document') + '</select>') : '') + '</div>' +
+    '<div class="card" style="margin:10px 0">' + esc(t.body) + '</div><label>Placeholder labels</label><div id="vars">' + labelInputs(ph, s.names, null, false) + '</div>' +
+    (t.media_type ? '<p class="small muted" style="margin:4px 0 0">{{' + (ph.length + 1) + '}} is the attachment: each broadcast fills it with a Google Drive share link.</p>' : '') + '<div id="merr"></div><div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>', true);
   $$('[data-n]', m).forEach(i => i.oninput = () => { s.names[i.dataset.n - 1] = i.value; }); $('#x', m).onclick = m.close;
-  $('#s', m).onclick = async () => { try { await call('donor.templates.update', t.id, { message_type: val('m-type'), source_code: val('m-src'), variable_names: ph.map(n => s.names[n - 1] || '') }); toast('Saved'); m.close(); views['donor/templates'](); } catch (e) { $('#merr', m).innerHTML = errorsHtml(e); } };
+  $('#s', m).onclick = async () => { try { await call('donor.templates.update', t.id, { message_type: val('m-type'), source_code: val('m-src'), variable_names: ph.map(n => s.names[n - 1] || ''), media_type: $('#m-media', m) ? val('m-media') : undefined }); toast('Saved'); m.close(); views['donor/templates'](); } catch (e) { $('#merr', m).innerHTML = errorsHtml(e); } };
 }
 
 // ---------- broadcasts (T8 general, T11 special, T12 festive) ----------
@@ -1759,7 +1763,7 @@ async function broadcastForm(b) {
       fld('Send on (empty = as soon as approved)', '<input id="b-on" type="date" value="' + esc(s.send_on) + '">') + (s.kind === 'festive_greeting' ? fld('Festival date (greeting is dropped 2 days after)', '<input id="b-ev" type="date" value="' + esc(s.event_date) + '">') : '') +
       fld('Campaign (optional: links it to a campaign; does not add its donors)', '<select id="b-camp">' + opt('', 'None', !s.campaign_id) + camps.map(c => opt(c.id, c.name, c.id === s.campaign_id)).join('') + '</select>') + '</div>' +
       '<label>Also send to these segments</label><div class="checks">' + Object.keys(state.dmeta.segments).map(c => '<label><input type="checkbox" data-sg="' + c + '" ' + (s.segments.indexOf(c) >= 0 ? 'checked' : '') + '> ' + c + ' ' + esc(state.dmeta.segments[c]) + '</label>').join('') + '</div>' + tagBox() +
-      (custom.length ? '<label>Values for this send</label><div class="grid2">' + custom.map(l => { const k = String(l).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return fld(esc(l), '<input data-v="' + esc(k) + '" value="' + esc(s.values[k] || '') + '">'); }).join('') + '</div>' : '') +
+      (custom.length ? '<label>Values for this send</label><div class="grid2">' + custom.map(l => { const k = String(l).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return k === 'media_file' ? fld('Attachment: Google Drive share link (' + (t.media_type === 'document' ? 'PDF' : 'PNG or JPG') + ', Anyone with the link) <span class="d-req" aria-hidden="true">*</span>', '<input data-v="media_file" value="' + esc(s.values[k] || '') + '" placeholder="https://drive.google.com/file/d/\u2026/view?usp=sharing">') : fld(esc(l), '<input data-v="' + esc(k) + '" value="' + esc(s.values[k] || '') + '">'); }).join('') + '</div>' : '') +
       '<div id="berr"></div><div id="prev"></div><div class="actions"><button class="btn" id="x">Close</button><button class="btn" id="sv">Save &amp; preview</button></div>';
     $('#x', m).onclick = m.close;
     $('#b-kind', m).onchange = e => { grab(); s.kind = e.target.value; s.template_id = ''; draw(); };
@@ -1802,7 +1806,7 @@ async function broadcastForm(b) {
       const p = await call('donor.broadcasts.preview', s.id);
       const bad = !p.count || p.missing.length || !p.template;
       $('#prev', m).innerHTML = '<div class="card" style="margin-top:12px"><h2>Check before approving</h2><p><b>' + p.count + ' people</b>: ' + p.by_whatsapp + ' by WhatsApp, ' + p.by_email + ' by email' + (p.unreachable ? '. <b>' + p.unreachable + ' more in these segments have neither opt-in and are left out</b>' : '') + (p.by_tags ? '. ' + p.by_tags + ' in these segments are left out by the tag filter' : '') + '. Someone with both opt-ins gets both.</p>' +
-        (p.sample ? '<label>Sample for ' + esc(p.sample.donor) + '</label><div class="wa">' + esc(p.sample.text) + '</div>' : '<p class="muted">Choose a template to see the text.</p>') +
+        (p.sample ? '<label>Sample for ' + esc(p.sample.donor) + '</label><div class="wa">' + (p.media ? (p.media.type === 'image' ? '<a href="' + esc(p.media.view_url) + '" target="_blank" rel="noopener"><img src="' + esc(p.media.thumb_url) + '" alt="Attached image" style="display:block;max-width:100%;max-height:220px;border-radius:8px;margin-bottom:8px"></a>' : '<a href="' + esc(p.media.view_url) + '" target="_blank" rel="noopener" style="display:block;margin-bottom:8px">\ud83d\udcc4 PDF attached (open)</a>') : '') + esc(p.sample.text) + '</div>' + (p.email_note ? '<p class="small muted" style="margin:4px 0 0">' + esc(p.email_note) + '</p>' : '') : '<p class="muted">Choose a template to see the text.</p>') +
         (p.missing.length ? '<div class="alert" style="margin-top:10px">' + p.missing.map(esc).join('<br>') + '</div>' : '') +
         dRecipientsHtml(p) +
         // which channels to send on: both on by default; with both off nothing can be approved
@@ -1851,7 +1855,7 @@ views['donor/queue'] = async function () {
     main().innerHTML = '<div class="head"><div><h1>Queue</h1><p class="sub" style="margin:0">Every donor message and why it is waiting. Each message goes by WhatsApp and/or email, as the donor opted in. Only contacts who opted in to that channel get it.</p></div><button class="btn primary" id="go">Send waiting messages now</button></div>' +
       (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="qq" type="search" value="' + esc(f.q) + '" placeholder="Contact name or status (e.g. queued, held, sent, failed, cancelled)">') + dCount(list.length, all.length, 'message') + '</div><p class="small muted" style="margin:6px 0 0">The newest 1000 messages.</p></div>' : '') +
       '<div class="card scroll">' + (list.length ? '<table><thead><tr><th>Contact</th><th>Message</th><th>Status</th><th>Why / details</th><th>Updated</th><th></th></tr></thead><tbody>' + shown.map(m =>
-        '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(m.message_type.replace(/_/g, ' ')) + '<div class="muted">' + dTrig(m.trigger) + ' · ' + esc(dChannel(m)) + '</div></td><td>' + badge(m.status) + '</td>' +
+        '<tr><td>' + esc(m.donor_name) + ' ' + segTag(m.donor_segment) + '</td><td class="small">' + esc(String(m.message_type || '').replace(/_/g, ' ')) + '<div class="muted">' + dTrig(m.trigger) + ' · ' + esc(dChannel(m)) + '</div></td><td>' + dBadge(m.status) + '</td>' +
         '<td class="small muted">' + esc(m.hold_reason || m.wa_error || (m.status === 'queued' && m.not_before && Date.parse(m.not_before) > Date.now() ? 'Scheduled for ' + fmtDate(m.not_before) : '')) + (m.reply_text ? '<br>“' + esc(m.reply_text) + '”' : '') + '</td><td class="small muted">' + esc(timeAgo(m.updated_at)) + '</td>' +
         '<td style="white-space:nowrap">' + (['queued', 'held', 'awaiting_confirmation'].indexOf(m.status) >= 0 ? '<button class="btn small" data-c="' + m.id + '">Cancel</button>' : m.status === 'failed' ? '<button class="btn small" data-rt="' + m.id + '">Retry</button>' : '') + '</td></tr>').join('') + '</tbody></table>' +
         // footer: rows per page and page n / total (same as the Contacts page)

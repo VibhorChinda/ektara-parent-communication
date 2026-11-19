@@ -357,10 +357,6 @@ var API = {
   'parents.list': function (u, f) { return listParents_(u, f); },
   'parents.groups': function (u) { return listGroups_(); },
   'parents.upload': function (u, csv) { return uploadParents_(u, csv); },
-  'parents.update': function (u, id, body) { return updateParent_(u, id, body); },
-  'parents.delete': function (u, id) { return deleteParent_(u, id); },
-  'parents.move': function (u, body) { return moveGroup_(u, body); },
-  'parents.deleteGroup': function (u, body) { return deleteGroup_(u, body); },
   'parents.history': function (u, id) { return parentHistory_(u, id); },
   'templates.list': function (u, status) { return listTemplates_(u, status); },
   'templates.create': function (u, body) { return createTemplate_(u, body); },
@@ -382,6 +378,12 @@ var API = {
   'messages.events': function (u, id) { return eventsForMessage_(id); }
 };
 
+/**
+ * google.script.run hands the page null (shown as "Request failed") when a reply holds a value it cannot send, such as a
+ * date read from a sheet cell. A JSON round trip turns those into plain text first.
+ */
+function plainData_(v) { return v === undefined ? null : JSON.parse(JSON.stringify(v)); }
+
 /** Single entry point for google.script.run. Always returns {ok, data} or {ok:false, error, errors}. */
 function api(method, args) {
   try {
@@ -390,7 +392,9 @@ function api(method, args) {
     if (!fn) throw new ApiError('Unknown method ' + method, null, 404);
     var division = divisionFor_(method);
     if (division) requireDivision_(user, division); // the server enforces access; hiding UI is not security
-    return { ok: true, data: fn.apply(null, [user].concat(args || [])) };
+    var data = fn.apply(null, [user].concat(args || []));
+    if (division === 'donor') data = plainData_(data);   // donor only: dates and other non-plain values become text, so the reply is never lost
+    return { ok: true, data: data };
   } catch (e) {
     if (e instanceof ApiError) return { ok: false, error: e.message, errors: e.errors, status: e.status };
     console.error(method + ': ' + (e && e.stack || e));
@@ -458,10 +462,10 @@ function buildArchive_(c, t) {
   var byMsg = {}; msgs.forEach(function (m) { byMsg[m.id] = m; });
 
   var recipients = msgs.map(function (m) {
-    var p = parentForDisplay_(m, parents), v = tpls[m.template_id] || {};
+    var p = parentForDisplay_(m, parents);
     return { sort: [p.institution, p.class_or_year, p.section || '', p.parent_name], row: [
-      p.parent_name, p.child_name || '', p.phone_e164, p.institution, p.class_or_year, p.section || '', p.language,
-      p.has_whatsapp ? 'yes' : 'no', v.name ? v.name + ' (' + v.language + ')' : '',
+      p.parent_name, p.child_name || '', parents[m.parent_id] ? m.parent_id : '', p.phone_e164, p.institution, p.class_or_year, p.section || '',
+      p.beneficiary_type || '', p.beneficiary_status || '',
       STATUS_LABELS_[m.status] || m.status, m.confirmed_via || '', localTime_(m.wa_sent_at), m.wa_error || '',
       localTime_(m.call_requested_at), m.call_status || '', m.call_digit || '', m.reply_text || '', localTime_(m.replied_at),
       m.resolved_by || '', localTime_(m.updated_at)] };
@@ -488,8 +492,9 @@ function buildArchive_(c, t) {
   });
   var answered = counts.confirmed + counts.declined;
   var summary = [
-    ['Campaign', archiveName_(c, t)], ['Campaign ID', c.id], ['Campaign name', c.name || ''], ['Audience', c.audience], ['School / college', c.institution || 'Several (see Audience)'],
-    ['Class / year', campaignGroups_(c).length > 1 ? 'See Audience' : c.class_or_year || 'All'], ['Section', campaignGroups_(c).length > 1 ? 'See Audience' : c.section || 'All'],
+    ['Campaign', archiveName_(c, t)], ['Campaign ID', c.id], ['Campaign name', c.name || ''], ['Audience', c.audience], ['School', c.institution || 'Several or all (see Audience)'],
+    ['Grade', campaignGroups_(c).length > 1 ? 'See Audience' : c.class_or_year || 'All'], ['Section / stream', campaignGroups_(c).length > 1 ? 'See Audience' : c.section || 'All'],
+    ['Type of beneficiary', (c.beneficiary_types || []).join(', ') || 'All'],
     ['Template', (t.name || '') + ' (' + (t.language || '') + ')'], ['Message text sent', text], ['Template body (raw)', t.body || ''],
     ['Values used', Object.keys(vars).sort(function (a, b) { return a - b; }).map(function (k) { return '{{' + k + '}} = ' + vars[k]; }).join('; ')],
     ['Sent by', senderName_(c.created_by) || ''], ['Created', localTime_(c.created_at)], ['Campaign status', c.status],
@@ -501,8 +506,8 @@ function buildArchive_(c, t) {
     ['Typed WhatsApp replies', typed], ['Fallback calls placed', calls]);
   return {
     Summary: { header: ['Item', 'Value'], rows: summary },
-    Recipients: { header: ['Parent', 'Child', 'Phone', 'School / college', 'Class / year', 'Section', 'Language', 'Has WhatsApp',
-      'Template version sent', 'Status', 'Answered via', 'WhatsApp sent at', 'WhatsApp error', 'Call requested at', 'Call status',
+    Recipients: { header: ['Parent', 'Child', 'New Child ID', 'Phone', 'School', 'Grade', 'Section / stream',
+      'Type of beneficiary', 'Status of beneficiary', 'Status', 'Answered via', 'WhatsApp sent at', 'WhatsApp error', 'Call requested at', 'Call status',
       'Key pressed', 'Typed reply', 'Replied at', 'Recorded by', 'Last update'], rows: recipients },
     Timeline: { header: ['Time', 'Parent', 'Phone', 'Source', 'What happened', 'Raw payload'], rows: timeline }
   };
@@ -696,11 +701,24 @@ function countByStatus_(msgs) {
   return out;
 }
 
-function audienceLabel_(institution, type, classOrYear, section) {
+function audienceLabel_(institution, classOrYear, section) {
   var parts = [institution];
-  if (classOrYear) parts.push((type === 'college' ? 'Year ' : 'Class ') + classOrYear);
-  if (section) parts.push('Section ' + section);
+  if (classOrYear) parts.push('Grade ' + classOrYear);
+  if (section) parts.push(section);
   return parts.join(' · ');
+}
+
+/** The audience as one line: the groups (or "All schools") plus the beneficiary types, if any were picked. */
+function campaignAudienceLabel_(groups, types) {
+  var where = !groups.length ? 'All schools' : groups.length === 1 ? audienceLabel_(groups[0].institution, groups[0].class_or_year, groups[0].section) : groupsLabel_(groups);
+  return where + (types.length ? ' \u00b7 ' + types.join(', ') : '');
+}
+
+/** The beneficiary types picked on the page (none = every type). */
+function cleanTypes_(list) {
+  var seen = {}, out = [];
+  (list || []).forEach(function (t) { var v = cleanText_(t); if (v && !seen[v]) { seen[v] = true; out.push(v); } });
+  return out;
 }
 
 /** The template of a campaign for display: the current row, or the copy saved on the campaign if it was deleted. */
@@ -711,7 +729,7 @@ function campaignTemplate_(c, t) {
 /** The parent of a message for display: the current row, or the copy saved on the message if the parent was deleted. */
 function parentForDisplay_(m, parents) {
   return parents[m.parent_id] || { parent_name: m.parent_name || '(deleted)', child_name: m.child_name || '', phone_e164: m.phone_e164 || '',
-    institution: '', class_or_year: '', section: '', language: '', has_whatsapp: false, opted_out: false };
+    institution: '', class_or_year: '', section: '', beneficiary_type: '', beneficiary_status: '' };
 }
 
 /** The groups a campaign went to. Older campaigns have one group in institution / class_or_year / section. */
@@ -720,23 +738,22 @@ function campaignGroups_(c) {
   return [{ institution: c.institution, class_or_year: c.class_or_year || null, section: c.section || null }];
 }
 
-/** Clean the groups picked on the page: a school is required, and a section only counts inside a class. */
+/** Clean the groups picked on the page: each needs a school, and a section only counts inside a grade. May be empty (send by type only). */
 function cleanGroups_(list) {
   var seen = {}, out = [];
   (list || []).forEach(function (g) {
     var inst = String((g && g.institution) || '').trim();
-    if (!inst) throw new ApiError('Choose a school or college.');
+    if (!inst) throw new ApiError('Choose a school.');
     var cy = String(g.class_or_year || '').trim() || null;
     var sec = cy ? (String(g.section || '').trim() || null) : null;
     var key = [inst, cy || '', sec || ''].join('\u0001');
     if (!seen[key]) { seen[key] = true; out.push({ institution: inst, class_or_year: cy, section: sec }); }
   });
-  if (!out.length) throw new ApiError('Choose at least one school or college.');
   return out;
 }
 
-/** "School A: Class 7 (A, B), Class 8 · School B" */
-function groupsLabel_(groups, typeOf) {
+/** "School A: Grade 7 (A, B), Grade 8 \u00b7 School B" */
+function groupsLabel_(groups) {
   var insts = [], byInst = {};
   groups.forEach(function (g) {
     if (!byInst[g.institution]) { byInst[g.institution] = []; insts.push(g.institution); }
@@ -745,7 +762,7 @@ function groupsLabel_(groups, typeOf) {
   return insts.map(function (inst) {
     var gs = byInst[inst];
     if (gs.some(function (g) { return !g.class_or_year; })) return inst; // the whole school
-    var word = typeOf[inst] === 'college' ? 'Year ' : 'Class ', classes = [], secs = {};
+    var word = 'Grade ', classes = [], secs = {};
     gs.forEach(function (g) {
       if (!secs[g.class_or_year]) { secs[g.class_or_year] = []; classes.push(g.class_or_year); }
       secs[g.class_or_year].push(g.section);
@@ -757,18 +774,6 @@ function groupsLabel_(groups, typeOf) {
   }).join(' \u00b7 ');
 }
 
-/** Approved templates with the same name (ignoring _v2...) and placeholders; newest per language. */
-function languageVersions_(template, all) {
-  var base = stripVersion_(template.name), nums = placeholderNumbers_(template.body).join(',');
-  var cands = all.filter(function (t) {
-    return t.status === 'approved' && stripVersion_(t.name) === base && placeholderNumbers_(t.body).join(',') === nums;
-  }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
-  var versions = {};
-  cands.forEach(function (t) { if (!versions[t.language]) versions[t.language] = t; });
-  versions[template.language] = template;
-  return versions;
-}
-
 function senderName_(email) {
   if (!email) return null;
   var a = findOne_('Admins', 'email', email);
@@ -776,9 +781,9 @@ function senderName_(email) {
 }
 
 function createCampaign_(user, body) {
+  requireNewParentsTab_();
   return withLock_(function () {
-    var tpls = loadTable_('Templates');
-    var template = tpls.filter(function (t) { return t.id === body.template_id; })[0];
+    var template = findOne_('Templates', 'id', body.template_id);
     if (!template) throw new ApiError('Template not found', null, 404);
     if (template.status !== 'approved') throw new ApiError('This template is not approved by WhatsApp yet.');
 
@@ -790,30 +795,33 @@ function createCampaign_(user, body) {
       variables[String(n)] = v;
     });
 
-    var groups = cleanGroups_(body.groups || [body]); // body.groups: [{institution, class_or_year, section}]
-    // Each parent is checked once, so a parent who matches two picked groups still gets one message.
+    // Audience: picked groups (school / grade / section) and/or picked beneficiary types. An empty list means "any".
+    var groups = cleanGroups_(body.groups), types = cleanTypes_(body.beneficiary_types);
+    if (!groups.length && !types.length) throw new ApiError('Choose at least one school or one type of beneficiary.');
+    // One message per child (siblings sharing a phone each get their own). Discontinued children get none.
     var parents = loadTable_('Parents').filter(function (p) {
-      return !p.opted_out && groups.some(function (g) { return inGroup_(p, g.institution, g.class_or_year, g.section); });
+      if (isDiscontinued_(p)) return false;
+      if (types.length && types.indexOf(p.beneficiary_type) < 0) return false;
+      return !groups.length || groups.some(function (g) { return inGroup_(p, g.institution, g.class_or_year, g.section); });
     });
-    if (!parents.length) throw new ApiError('No parents found in the chosen groups.');
-    var typeOf = {}; parents.forEach(function (p) { typeOf[p.institution] = p.institution_type; });
+    if (!parents.length) throw new ApiError('No children found for this audience.');
     var one = groups.length === 1 ? groups[0] : null;
-    var sameInst = groups.every(function (g) { return g.institution === groups[0].institution; });
+    var sameInst = groups.length > 0 && groups.every(function (g) { return g.institution === groups[0].institution; });
 
     var cid = newId_(), now = nowIso_();
     insertRows_('Campaigns', [{
       id: cid, template_id: template.id,
-      audience: one ? audienceLabel_(one.institution, typeOf[one.institution], one.class_or_year, one.section) : groupsLabel_(groups, typeOf),
+      audience: campaignAudienceLabel_(groups, types),
       // The single-group columns stay filled when they still describe the whole campaign.
       institution: sameInst ? groups[0].institution : null, class_or_year: one ? one.class_or_year : null, section: one ? one.section : null,
-      groups: groups, variables: variables, created_by: user.email, status: 'sending', created_at: now,
+      groups: groups, beneficiary_types: types.length ? types : null, variables: variables, created_by: user.email, status: 'sending', created_at: now,
       name: String(body.name || '').trim().slice(0, 100) || null, // optional; the audience is shown when empty
       // A copy for display only, so the campaign still shows its template after the template is deleted.
       template_name: template.name, template_language: template.language, template_body: template.body, template_has_buttons: template.has_confirm_buttons
     }]);
-    var versions = languageVersions_(template, tpls);
+    // Everyone gets the campaign's template, in that template's language.
     insertRows_('Messages', parents.map(function (p) {
-      return { id: newId_(), campaign_id: cid, parent_id: p.id, template_id: (versions[p.language] || template).id,
+      return { id: newId_(), campaign_id: cid, parent_id: p.id, template_id: template.id,
         status: 'queued', updated_at: now,
         // A copy for display only, so past campaigns still show who it went to after a parent is deleted.
         parent_name: p.parent_name, child_name: p.child_name || null, phone_e164: p.phone_e164 };
@@ -827,7 +835,7 @@ function listCampaigns_(user, f) {
   var offset = Number(f.offset) || 0;
   var rows = loadTable_('Campaigns').filter(function (c) {
     return campaignGroups_(c).some(function (g) {
-      if (f.institution && g.institution !== f.institution) return false;
+      if (f.institution && g.institution && g.institution !== f.institution) return false;   // no school = sent by type to every school
       // A filter also matches campaigns sent to a wider group (class 7 shows whole-school sends).
       if (f.class_or_year && g.class_or_year && g.class_or_year !== f.class_or_year) return false;
       if (f.section && g.section && g.section !== f.section) return false;
@@ -861,7 +869,7 @@ function getCampaign_(user, id, status) {
   msgs = msgs.map(function (m) {
     var p = parentForDisplay_(m, parents);
     m.parents = { parent_name: p.parent_name, child_name: p.child_name, phone_e164: p.phone_e164,
-      has_whatsapp: p.has_whatsapp, opted_out: p.opted_out, language: p.language, deleted: !parents[m.parent_id] };
+      beneficiary_type: p.beneficiary_type, beneficiary_status: p.beneficiary_status, deleted: !parents[m.parent_id] };
     m.call_due_at = parents[m.parent_id] ? nextCallTime_(m, p, c.status, now) : null; // no calls to a deleted parent
     delete m._row;
     return m;
@@ -1074,9 +1082,10 @@ var BUILD_Db = '20261107-1230'; // build stamp (see Build.gs)
 var SCHEMA = {
   Admins: [['email', 's'], ['full_name', 's'], ['active', 'b'], ['parent_access', 's'], ['donor_access', 's'],
     ['org_overview', 's'], ['role', 's'], ['admin_caps', 's'], ['expires_on', 's']],
-  Parents: [['id', 's'], ['parent_name', 's'], ['phone_e164', 's'], ['child_name', 's'], ['institution', 's'],
-    ['institution_type', 's'], ['class_or_year', 's'], ['section', 's'], ['language', 's'],
-    ['has_whatsapp', 'b'], ['opted_out', 'b'], ['created_at', 's'], ['updated_at', 's']],
+  // One row per child. id is Ek Tara's "New Child ID" from the upload (the app does not generate it).
+  Parents: [['id', 's'], ['file_number', 's'], ['parent_name', 's'], ['phone_e164', 's'], ['child_name', 's'],
+    ['institution', 's'], ['beneficiary_type', 's'], ['beneficiary_status', 's'], ['class_or_year', 's'], ['section', 's'],
+    ['created_at', 's'], ['updated_at', 's']],
   Templates: [['id', 's'], ['name', 's'], ['language', 's'], ['category', 's'], ['body', 's'],
     ['variable_names', 'j'], ['sample_values', 'j'], ['has_confirm_buttons', 'b'], ['status', 's'],
     ['twilio_content_sid', 's'], ['rejection_reason', 's'], ['requested_by', 's'], ['decision_seen', 'b'],
@@ -1085,7 +1094,8 @@ var SCHEMA = {
   Campaigns: [['id', 's'], ['template_id', 's'], ['audience', 's'], ['institution', 's'], ['class_or_year', 's'],
     ['section', 's'], ['variables', 'j'], ['created_by', 's'], ['status', 's'], ['created_at', 's'],
     ['archive_url', 's'], ['archived_at', 's'], ['groups', 'j'], ['name', 's'],
-    ['template_name', 's'], ['template_language', 's'], ['template_body', 's'], ['template_has_buttons', 'b']],
+    ['template_name', 's'], ['template_language', 's'], ['template_body', 's'], ['template_has_buttons', 'b'],
+    ['beneficiary_types', 'j']],
   Messages: [['id', 's'], ['campaign_id', 's'], ['parent_id', 's'], ['template_id', 's'], ['status', 's'],
     ['wa_sid', 's'], ['wa_sent_at', 's'], ['wa_error', 's'], ['call_sid', 's'], ['call_requested_at', 's'],
     ['call_status', 's'], ['call_digit', 's'], ['confirmed_via', 's'], ['send_claimed_at', 's'],
@@ -1101,7 +1111,7 @@ var SCHEMA = {
     ['owner_name', 's'], ['owner_email', 's'], ['last_donation_date', 's'], ['last_donation_amount', 's'],
     ['last_message_at', 's'], ['last_message_type', 's'],
     ['notes', 's'], ['created_at', 's'], ['updated_at', 's'],
-    // added later (donor tabs are read by header, so a missing column is simply added to the sheet)
+    // added later: new donor fields go at the END of the list (columns are read by position; setup adds the header)
     ['org', 's'], ['reference', 's'], ['email_opt_in', 'b'], ['email_opt_in_at', 's'], ['email_opt_in_source', 's'], ['tags', 'j'], ['contact_status', 's']],   // contact_status: ACTIVE / INACTIVE (blank = ACTIVE)
   SegmentHistory: [['id', 's'], ['donor_id', 's'], ['from_segment', 's'], ['to_segment', 's'], ['reason', 's'], ['changed_by', 's'], ['changed_at', 's']],
   Donations: [['id', 's'], ['donor_id', 's'], ['campaign_id', 's'], ['amount', 's'], ['donated_on', 's'], ['note', 's'],
@@ -1123,7 +1133,7 @@ var SCHEMA = {
   Overview: [['key', 's'], ['value', 'j'], ['updated_at', 's']]
 };
 // Donor templates and donor events have the same shape as the parent ones, but live in the donor file.
-SCHEMA.DonorTemplates = SCHEMA.Templates.slice();
+SCHEMA.DonorTemplates = SCHEMA.Templates.concat([['media_type', 's']]);   // donor only: '' | image | document (a WhatsApp media template)
 SCHEMA.DonorEvents = SCHEMA.Events.slice();
 
 /**
@@ -1166,119 +1176,79 @@ function fileIdOf_(file) {
 }
 
 /**
- * Donor tabs are read and written by header name (row 1), so their columns can be reordered, and the team can add columns
- * of its own, without breaking anything. Parent and access tabs are still read by column position (unchanged).
+ * Every tab (parent, donor, access) is read and written by column position, in SCHEMA order.
+ * Donor tabs are checked once per run: if their columns are not in SCHEMA order the app refuses to read or write them,
+ * so a moved or inserted column can never put values in the wrong place. The fix is to move the columns back into SCHEMA order
+ * in the sheet. Columns the team adds to the right of the app's columns are left alone.
  */
-function byHeader_(name) { return FILE_OF[name] === 'donor'; }
-
 function sheet_(name) {
   if (!sheetCache_[name]) {
     var s = ssFor_(FILE_OF[name] || 'parent').getSheetByName(name);
     if (!s) throw new Error('Sheet "' + name + '" is missing. Run Setup (see SETUP.md).');
-    if (byHeader_(name)) { removeDonorColumns_(s, name); sheetCache_['#' + name] = donorHeaders_(s, name); }
+    if (FILE_OF[name] === 'donor') {
+      var bad = donorLayoutProblem_(s, name, false);
+      if (bad) throw new ApiError(bad + ' Nothing was read or saved. Move the columns back into the app’s order in the donor Google Sheet (the donor Overview screen lists the order).');
+    }
     sheetCache_[name] = s;
   }
   return sheetCache_[name];
 }
 
-/** "Email Opt-In " and "email_opt_in" are the same header. */
-function headerKey_(h) { return String(h === null || h === undefined ? '' : h).trim().toLowerCase().replace(/[\s\-]+/g, '_'); }
-
-/**
- * Columns the app no longer uses. They are deleted from the donor sheet once (with their data) to keep it tidy. Reads go by
- * header, so this is housekeeping only: nothing would break if one stayed.
- */
-var DONOR_REMOVED_COLUMNS = {
-  Donors: ['next_report_due', 'trustee_confirmed', 'last_update_at', 'last_message_trigger', 'current_status', 'prior_year_amount',
-    'timeline_start', 'timeline_end', 'report_link', 'reporting_frequency'],
-  DonorCampaigns: ['midpoint_date'],
-  DonorBroadcasts: ['include_ids', 'exclude_ids', 'dedupe_key'],
-  DonorMessages: ['priority']
-};
-function removeDonorColumns_(s, name) {
-  var gone = DONOR_REMOVED_COLUMNS[name];
-  if (!gone || s.getLastColumn() < 1) return;
-  var hdr = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
-  for (var i = hdr.length - 1; i >= 0; i--) if (gone.indexOf(headerKey_(hdr[i])) >= 0) s.deleteColumn(i + 1);
+/** True when the Parents tab has the current header row (or no header yet). */
+function parentsHeaderOk_(sh) {
+  var want = fieldNames_('Parents');
+  if (sh.getLastRow() === 0) return true;
+  if (sh.getMaxColumns() < want.length) return false;
+  var have = sh.getRange(1, 1, 1, want.length).getValues()[0];
+  return want.every(function (w, i) { return String(have[i]) === w; });
 }
 
+/** Parent pages refuse to read or write an old-style Parents tab until setup() has replaced it. */
+function requireNewParentsTab_() {
+  if (!parentsHeaderOk_(sheet_('Parents'))) throw new ApiError('The Parents tab still has the old columns. Ask the project owner to run setup() once from the Apps Script editor: it keeps the old tab as a backup and creates the new one.');
+}
+
+function colLetter_(n) { var s = ''; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+
 /**
- * Where each of the app's columns is in a donor tab: { col: {field: column number}, width, segments: [{start, fields}] }.
- * segments are runs of adjacent app columns, so a save writes only the app's own cells and never the team's columns.
- * A column the app needs but cannot find is added at the end (and logged); a column that appears twice is an error.
+ * '' when a donor tab's first columns are exactly the app's columns, in SCHEMA order; otherwise what is wrong, in plain words.
+ * missingTailOk: blank headers at the end are accepted (setup then writes them, e.g. for a column added to SCHEMA later).
  */
-function donorHeaders_(s, name) {
-  var width = s.getLastColumn(), hdr = width ? s.getRange(1, 1, 1, width).getValues()[0] : [];
-  var known = {}; SCHEMA[name].forEach(function (c) { known[c[0]] = c; });
-  var col = {}, dup = [];
-  hdr.forEach(function (h, i) {
-    var k = headerKey_(h); if (!known[k]) return;   // the team's own column: left alone
-    if (col[k]) { if (dup.indexOf(k) < 0) dup.push(k); } else col[k] = i + 1;
-  });
-  if (dup.length) throw new Error('The "' + name + '" tab of the donor sheet has the column ' + dup.join(', ') + ' more than once. Delete or rename the extra one, then reload.');
-  var missing = SCHEMA[name].filter(function (c) { return !col[c[0]]; });
-  if (missing.length) {
-    if (s.getMaxColumns() < width + missing.length) s.insertColumnsAfter(s.getMaxColumns(), width + missing.length - s.getMaxColumns());
-    missing.forEach(function (c, j) { col[c[0]] = width + j + 1; });
-    s.getRange(1, width + 1, s.getMaxRows(), missing.length).setNumberFormat('@');
-    s.getRange(1, width + 1, 1, missing.length).setValues([missing.map(function (c) { return c[0]; })]).setFontWeight('bold');
-    if (width) console.warn('Donor sheet, tab "' + name + '": added missing column(s) ' + missing.map(function (c) { return c[0]; }).join(', ') + ' at the end.');
-    width += missing.length;
+function donorLayoutProblem_(s, name, missingTailOk) {
+  var cols = fieldNames_(name), width = Math.min(s.getLastColumn(), cols.length);
+  var raw = width ? s.getRange(1, 1, 1, width).getValues()[0] : [];
+  for (var i = 0; i < cols.length; i++) {
+    var h = donorHeaderKey_(raw[i]);
+    if (h === cols[i]) continue;
+    if (missingTailOk && !h && raw.slice(i).every(function (x) { return !donorHeaderKey_(x); })) return '';
+    return 'The "' + name + '" tab of the donor sheet is not in the app’s column order: column ' + colLetter_(i + 1) + ' should be "' + cols[i] + '" but is ' +
+      (h ? '"' + String(raw[i]).trim() + '"' : 'empty') + '.';
   }
-  var order = SCHEMA[name].slice().sort(function (a, b) { return col[a[0]] - col[b[0]]; }), segments = [];
-  order.forEach(function (c) {
-    var last = segments[segments.length - 1];
-    if (last && col[c[0]] === last.start + last.fields.length) last.fields.push(c); else segments.push({ start: col[c[0]], fields: [c] });
+  return '';
+}
+
+/** The column order each donor tab must have: [{ tab, columns: [names] }] (shown on the donor Overview when a tab is out of order). */
+function donorExpectedColumns_() {
+  return Object.keys(FILE_OF).filter(function (n) { return FILE_OF[n] === 'donor'; }).map(function (n) { return { tab: n, columns: fieldNames_(n) }; });
+}
+
+/** Every donor tab whose columns are out of order (for the donor Overview). */
+function donorLayoutProblems_() {
+  var ss = ssFor_('donor'), out = [];
+  Object.keys(FILE_OF).filter(function (n) { return FILE_OF[n] === 'donor'; }).forEach(function (name) {
+    var sh = ss.getSheetByName(name); if (!sh) return;
+    var bad = donorLayoutProblem_(sh, name, false); if (bad) out.push(bad);
   });
-  return { col: col, width: width, segments: segments };
+  return out;
 }
 
-/**
- * Owner tool: make every donor tab hold exactly the columns the app uses, in the app's order. Every other column is deleted
- * with its data (including columns the team added). A backup copy of the whole donor file is made first; if that fails,
- * nothing is changed. Returns a short report. Run from the donor Overview page ("Tidy sheet columns") or from the editor.
- */
-function tidyDonorSheets() {
-  var ss = ssFor_('donor'), backup;
-  if (!PropertiesService.getScriptProperties().getProperty(FILE_PROP.donor)) throw new Error('The donor file has not been set up yet. Run setup first.');
-  try { backup = DriveApp.getFileById(ss.getId()).makeCopy(ss.getName() + ' (backup before tidy ' + todayStr_() + ')'); }
-  catch (e) { throw new Error('Could not make a backup copy of the donor file, so nothing was changed: ' + e.message); }
-  var report = withLock_(function () {
-    sheetCache_ = {};
-    var lines = [];
-    Object.keys(FILE_OF).filter(function (n) { return FILE_OF[n] === 'donor'; }).forEach(function (name) {
-      var sh = ss.getSheetByName(name); if (!sh) return;
-      removeDonorColumns_(sh, name);
-      var h = donorHeaders_(sh, name), cols = SCHEMA[name], lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
-      var hdr = sh.getRange(1, 1, 1, lastCol).getValues()[0], keep = {};
-      cols.forEach(function (c) { keep[h.col[c[0]]] = true; });
-      var dropped = [], unnamed = 0;
-      hdr.forEach(function (x, i) { if (keep[i + 1]) return; if (String(x).trim()) dropped.push(String(x).trim()); else unnamed++; });
-      var data = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
-      var grid = [cols.map(function (c) { return c[0]; })].concat(data.map(function (r) { return cols.map(function (c) { return r[h.col[c[0]] - 1]; }); }));
-      sh.clearContents();
-      if (sh.getMaxColumns() > cols.length) sh.deleteColumns(cols.length + 1, sh.getMaxColumns() - cols.length);
-      sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
-      sh.getRange(1, 1, grid.length, cols.length).setValues(grid);
-      sh.getRange(1, 1, 1, cols.length).setFontWeight('bold');
-      sh.setFrozenRows(1);
-      var moved = hdr.filter(function (x, i) { return keep[i + 1]; }).map(headerKey_).join() !== grid[0].join();
-      lines.push(name + ': ' + (dropped.length || unnamed ? 'removed ' + dropped.concat(unnamed ? [unnamed + ' unnamed column(s)'] : []).join(', ') : 'no extra columns') +
-        (moved ? '; columns put back in order' : ''));
-    });
-    sheetCache_ = {};
-    return lines;
-  }, 60000);
-  var msg = 'Donor sheet tidied. Backup: ' + backup.getName() + '.\n' + report.join('\n');
-  console.log(msg); toast_('Donor sheet tidied. A backup copy was made first.');
-  return { backup_url: backup.getUrl(), backup_name: backup.getName(), report: report };
-}
+/** "Email Opt-In " and "email_opt_in" are the same header. */
+function donorHeaderKey_(h) { return String(h === null || h === undefined ? '' : h).trim().toLowerCase().replace(/[\s\-]+/g, '_'); }
 
-function hdr_(name) { sheet_(name); return sheetCache_['#' + name]; }
 /** Column number (1-based) of a field. */
-function colOf_(name, field) { return byHeader_(name) ? hdr_(name).col[field] : fieldNames_(name).indexOf(field) + 1; }
+function colOf_(name, field) { return fieldNames_(name).indexOf(field) + 1; }
 /** How many columns to read for a whole row. */
-function widthOf_(name) { return byHeader_(name) ? hdr_(name).width : SCHEMA[name].length; }
+function widthOf_(name) { return SCHEMA[name].length; }
 
 function newId_() { return Utilities.getUuid(); }
 
@@ -1299,10 +1269,10 @@ function toCell_(v, type) {
 
 function fieldNames_(name) { return SCHEMA[name].map(function (c) { return c[0]; }); }
 
-/** One sheet row (all its cells, in sheet order) as an object. Donor tabs: by header; others: by position. */
+/** One sheet row (its cells, in SCHEMA order) as an object. */
 function rowFromValues_(name, vals, rowNumber) {
-  var cols = SCHEMA[name], o = { _row: rowNumber }, col = byHeader_(name) ? hdr_(name).col : null;
-  for (var j = 0; j < cols.length; j++) o[cols[j][0]] = fromCell_(vals[col ? col[cols[j][0]] - 1 : j], cols[j][1]);
+  var cols = SCHEMA[name], o = { _row: rowNumber };
+  for (var j = 0; j < cols.length; j++) o[cols[j][0]] = fromCell_(vals[j], cols[j][1]);
   return o;
 }
 
@@ -1341,31 +1311,17 @@ function rowToValues_(name, obj) {
   return SCHEMA[name].map(function (c) { return toCell_(obj[c[0]], c[1]); });
 }
 
-/** Donor tabs: write rows from `start`, only into the app's own columns (one call per run of adjacent columns). */
-function writeDonorRows_(name, start, objs, asText) {
-  var sh = sheet_(name), end = start + objs.length - 1;
-  if (end > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), end - sh.getMaxRows() + 100);
-  hdr_(name).segments.forEach(function (seg) {
-    var rng = sh.getRange(start, seg.start, objs.length, seg.fields.length);
-    if (asText) rng.setNumberFormat('@');
-    rng.setValues(objs.map(function (o) { return seg.fields.map(function (c) { return toCell_(o[c[0]], c[1]); }); }));
-  });
-}
-
 /** Write changed rows back (rows must carry _row). Contiguous rows go in one call. */
 function saveRows_(name, rows) {
   if (!rows.length) return;
-  var sh = sheet_(name), n = SCHEMA[name].length, header = byHeader_(name);
+  var sh = sheet_(name), n = SCHEMA[name].length;
   var sorted = rows.slice().sort(function (a, b) { return a._row - b._row; });
   var i = 0;
   while (i < sorted.length) {
     var j = i;
     while (j + 1 < sorted.length && sorted[j + 1]._row === sorted[j]._row + 1) j++;
-    if (header) writeDonorRows_(name, sorted[i]._row, sorted.slice(i, j + 1), false);
-    else {
-      var block = sorted.slice(i, j + 1).map(function (r) { return rowToValues_(name, r); });
-      sh.getRange(sorted[i]._row, 1, block.length, n).setValues(block);
-    }
+    var block = sorted.slice(i, j + 1).map(function (r) { return rowToValues_(name, r); });
+    sh.getRange(sorted[i]._row, 1, block.length, n).setValues(block);
     i = j + 1;
   }
 }
@@ -1374,7 +1330,6 @@ function insertRows_(name, objs) {
   if (!objs.length) return;
   var sh = sheet_(name), n = SCHEMA[name].length, CHUNK = 2000;
   for (var i = 0; i < objs.length; i += CHUNK) {
-    if (byHeader_(name)) { writeDonorRows_(name, sh.getLastRow() + 1, objs.slice(i, i + CHUNK), true); continue; }
     var chunk = objs.slice(i, i + CHUNK).map(function (o) { return rowToValues_(name, o); });
     var start = sh.getLastRow() + 1, end = start + chunk.length - 1;
     if (end > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), end - sh.getMaxRows() + 100);
@@ -1384,14 +1339,9 @@ function insertRows_(name, objs) {
   }
 }
 
-/** Replace all data rows (used for bulk deletes). Donor tabs: only the app's own columns are cleared and rewritten. */
+/** Replace all data rows (used for bulk deletes). */
 function replaceTable_(name, objs) {
   var sh = sheet_(name), last = sh.getLastRow();
-  if (byHeader_(name)) {
-    if (last > 1) hdr_(name).segments.forEach(function (seg) { sh.getRange(2, seg.start, last - 1, seg.fields.length).clearContent(); });
-    if (objs.length) writeDonorRows_(name, 2, objs, true);
-    return;
-  }
   if (last > 1) sh.getRange(2, 1, last - 1, SCHEMA[name].length).clearContent();
   insertRows_(name, objs);
 }
@@ -1413,11 +1363,7 @@ function isDonorId_(id) { return String(id || '').indexOf('d-') === 0; }
 /** Append-only; safe without the lock. Returns the event id. division: 'donor' writes to the donor file, anything else to the parent file. */
 function logEvent_(messageId, source, payload, division) {
   var donor = division === 'donor', id = (donor ? 'd-' : '') + newId_(), tbl = donor ? 'DonorEvents' : 'Events';
-  var ev = { id: id, message_id: messageId || '', source: source, payload: payload || {}, created_at: nowIso_(), processed: false }, row;
-  if (donor) {   // by header: the app's cells in their columns, the team's columns left empty
-    row = []; for (var i = 0; i < widthOf_(tbl); i++) row.push('');
-    SCHEMA[tbl].forEach(function (c) { row[colOf_(tbl, c[0]) - 1] = toCell_(ev[c[0]], c[1]); });
-  } else row = [id, messageId || '', source, JSON.stringify(payload || {}), ev.created_at, 'FALSE'];
+  var row = [id, messageId || '', source, JSON.stringify(payload || {}), nowIso_(), 'FALSE'];   // DonorEvents has the same columns as Events
   sheet_(tbl).appendRow(row);   // appendRow is atomic, so this stays safe without the lock
   return id;
 }
@@ -1536,8 +1482,12 @@ function retryDonorTemplate_(user, id) {
 }
 
 var DONOR_API = {
-  'donor.tidySheets': function (u) { if (!u.owner) throw new ApiError('Only the project owner can tidy the donor sheet.', null, 403); return tidyDonorSheets(); },
-  'donor.home': function (u) { return donorReady_() ? Object.assign(donorOverview_(), { is_owner: !!u.owner }) : { ready: false, message: 'The donor workspace needs a one-time setup.', problem: donorSetupProblem_(), build_problem: buildProblems_(), can_setup: !!u.owner, planned: [] }; },
+  'donor.home': function (u) {
+    if (!donorReady_()) return { ready: false, message: 'The donor workspace needs a one-time setup.', problem: donorSetupProblem_(), build_problem: buildProblems_(), can_setup: !!u.owner, planned: [] };
+    var layout = donorLayoutProblems_();   // columns are read by position: nothing is read or saved until they are in order
+    if (layout.length) return { ready: false, layout: true, message: 'The donor Google Sheet’s columns are not in the order the app expects.', problem: layout.join(' '), expected: donorExpectedColumns_(), planned: [] };
+    return Object.assign(donorOverview_(), { is_owner: !!u.owner });
+  },
   'donor.meta': function (u) { return donorMeta_(); },
   'donor.tags': function (u) { return donorTags_(); },
   'donor.donors.list': function (u, f) { return listDonors_(u, f); },
@@ -1919,7 +1869,7 @@ function donorDetail_(user, id) {
   var donations = findBy_('Donations', 'donor_id', id).sort(function (a, b) { return String(b.donated_on).localeCompare(String(a.donated_on)); }).map(function (x) {
     var c = cleanDonorRow_(x); c.campaign_name = x.campaign_id && camps[x.campaign_id] ? camps[x.campaign_id].name : null; return c;
   });
-  var allMsgs = findBy_('DonorMessages', 'donor_id', id);
+  var allMsgs = findBy_('DonorMessages', 'donor_id', id).filter(function (m) { return m.status; });   // a row without a status is a cleared leftover
   var messages = allMsgs.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).slice(0, 10).map(function (m) {
     var c = cleanDonorRow_(m); c.template_name = m.template_id && tpls[m.template_id] ? tpls[m.template_id].name : null; return c;
   });
@@ -2092,7 +2042,9 @@ function listDonorCampaigns_() {
     (donors[x.campaign_id] = donors[x.campaign_id] || {})[x.donor_id] = true;
   });
   return loadTable_('DonorCampaigns').sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).map(function (c) {
-    var o = cleanDonorRow_(c); o.donor_count = Object.keys(donors[c.id] || {}).length; o.total_raised = total[c.id] || 0; return o;
+    var o = cleanDonorRow_(c); o.donor_count = Object.keys(donors[c.id] || {}).length; o.total_raised = total[c.id] || 0;
+    if (!o.status) o.status = 'planned';   // a blank status cell (e.g. typed into the sheet by hand) counts as planned
+    return o;
   });
 }
 
@@ -2104,22 +2056,64 @@ function validateDonorTemplateMeta_(b) {
   return errors;
 }
 
+// ---------- media templates (an image or PDF sent with the message) ----------
+/**
+ * A media template's file comes from Google Drive: the template's media address is DRIVE_MEDIA_URL + {{n}}, and each send fills
+ * {{n}} with a Drive file id, so one approved template can carry a different file every time. The file must be shared as
+ * "Anyone with the link". {{n}} is the number after the body's last placeholder, labelled media_file.
+ */
+var DRIVE_MEDIA_URL = 'https://drive.usercontent.google.com/download?export=download&id=';
+var MEDIA_TYPES = {
+  image: { label: 'Image', mimes: ['image/jpeg', 'image/png'], max: 5 * 1024 * 1024, what: 'a PNG or JPG image' },
+  document: { label: 'PDF', mimes: ['application/pdf'], max: 16 * 1024 * 1024, what: 'a PDF' }
+};
+var MEDIA_LABEL = 'media_file';
+
+/** The placeholder number of a media template's file (0 for a text template). */
+function mediaVarNumber_(tpl) { return tpl && MEDIA_TYPES[tpl.media_type] ? placeholderNumbers_(tpl.body).length + 1 : 0; }
+/** Every placeholder number a template needs filled: the body's, plus the file's for a media template. */
+function templateVarNumbers_(tpl) { var n = placeholderNumbers_(tpl.body), m = mediaVarNumber_(tpl); return m ? n.concat([m]) : n; }
+
+/** Checks a Drive share link (or file id) the way WhatsApp will fetch it. Returns the file id; throws an ApiError saying what is wrong. */
+function checkDriveMedia_(value, mediaType) {
+  var kind = MEDIA_TYPES[mediaType];
+  if (!kind) throw new ApiError('Choose Image or PDF for the attachment.');
+  var id = fileIdFrom_(value);
+  if (!id) throw new ApiError('Paste the Google Drive share link of the ' + kind.label + ' (in Drive: Share, Copy link).');
+  var r;
+  try { r = UrlFetchApp.fetch(DRIVE_MEDIA_URL + encodeURIComponent(id), { muteHttpExceptions: true, followRedirects: true }); }
+  catch (e) { throw new ApiError('Could not open the file from Google Drive: ' + e.message); }
+  var h = {}, raw = r.getHeaders() || {}; Object.keys(raw).forEach(function (k) { h[k.toLowerCase()] = raw[k]; });
+  var type = String(h['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (r.getResponseCode() !== 200 || type === 'text/html') throw new ApiError('WhatsApp cannot open this file. In Drive, set Share to "Anyone with the link" (Viewer), then try again.');
+  if (kind.mimes.indexOf(type) < 0) throw new ApiError('The file must be ' + kind.what + ' (this one is ' + (type || 'of an unknown type') + ').');
+  var size = Number(h['content-length']) || r.getBlob().getBytes().length;
+  if (size > kind.max) throw new ApiError('The file is ' + (Math.round(size / 104857.6) / 10) + ' MB; WhatsApp allows up to ' + (kind.max / 1048576) + ' MB for ' + (mediaType === 'image' ? 'an image' : 'a PDF') + '.');
+  return id;
+}
+
 function listDonorTemplates_() {
   return loadTable_('DonorTemplates')
     .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).map(publicTemplate_);
 }
 
 function createDonorTemplate_(user, body) {
-  var name = String(body.name || '').trim();
-  var errors = validateName_(name, body.language || 'en').concat(validateContent_(body)).concat(validateDonorTemplateMeta_(body));
+  var name = String(body.name || '').trim(), mediaType = MEDIA_TYPES[body.media_type] ? body.media_type : '';
+  var errors = validateName_(name, body.language || 'en').concat(validateContent_(body)).concat(validateDonorTemplateMeta_(body));   // the body's own placeholders
   if (!/^donor_/.test(name)) errors.unshift('Donor template names must start with donor_ (this keeps them apart from parent templates at WhatsApp).');
   if (errors.length) throw new ApiError(errors[0], errors);
+  var names = (body.variable_names || []).slice(), samples = {};
+  Object.keys(body.sample_values || {}).forEach(function (k) { samples[k] = body.sample_values[k]; });
+  if (mediaType) {   // the file is one more placeholder, after the body's; Meta reviews the sample file
+    var fileId = checkDriveMedia_(body.media_sample, mediaType);
+    names.push(MEDIA_LABEL); samples[String(placeholderNumbers_(body.body).length + 1)] = fileId;
+  }
   var id = withLock_(function () {
     if (nameTaken_(name, body.language || 'en', 'DonorTemplates')) throw new ApiError("A template named '" + name + "' already exists for this language.");
     var tid = insertTemplate_(user, { name: name, language: body.language || 'en', category: body.category, body: body.body,
-      variable_names: body.variable_names, sample_values: body.sample_values, has_confirm_buttons: false }, 'DonorTemplates');
+      variable_names: names, sample_values: samples, has_confirm_buttons: false }, 'DonorTemplates');
     var t = findOne_('DonorTemplates', 'id', tid);
-    t.division = 'donor'; t.message_type = body.message_type; t.source_code = strOrNull_(body.source_code);
+    t.division = 'donor'; t.message_type = body.message_type; t.source_code = strOrNull_(body.source_code); t.media_type = mediaType || null;
     saveRows_('DonorTemplates', [t]);
     return tid;
   });
@@ -2133,8 +2127,10 @@ function updateDonorTemplate_(user, id, body) {
   return withLock_(function () {
     var t = findOne_('DonorTemplates', 'id', id);
     if (!t) throw new ApiError('Template not found', null, 404);
-    var n = placeholderNumbers_(t.body).length, names = (body.variable_names || []).map(function (x) { return String(x || '').trim(); });
+    var n = placeholderNumbers_(t.body).length, names = (body.variable_names || []).slice(0, n).map(function (x) { return String(x || '').trim(); });
     if (names.length !== n || names.some(function (x) { return !x; })) throw new ApiError('Give a label for each of the ' + n + ' placeholders.');
+    if (MEDIA_TYPES[t.media_type] && MEDIA_TYPES[body.media_type]) t.media_type = body.media_type;   // Image <-> PDF (an imported template is guessed)
+    if (MEDIA_TYPES[t.media_type]) names.push(MEDIA_LABEL);   // the file's placeholder keeps its fixed label
     t.message_type = body.message_type; t.source_code = strOrNull_(body.source_code); t.variable_names = names; t.updated_at = nowIso_();
     saveRows_('DonorTemplates', [t]);
     return publicTemplate_(t);
@@ -2158,6 +2154,7 @@ function cleanBroadcast_(b) {
   var eventDate = strOrNull_(b.event_date) ? parseDateInput_(b.event_date) : null;
   if (strOrNull_(b.event_date) && !eventDate) throw new ApiError('The festival date is not valid.');
   var values = {}; Object.keys(b.values || {}).forEach(function (k) { var v = String(b.values[k] || '').trim(); if (v) values[labelKey_(k)] = v; });
+  if (values[MEDIA_LABEL]) values[MEDIA_LABEL] = fileIdFrom_(values[MEDIA_LABEL]) || values[MEDIA_LABEL];   // a Drive share link -> its file id
   return { name: name, kind: b.kind, template_id: strOrNull_(b.template_id), campaign_id: strOrNull_(b.campaign_id), segments: segs,
     values: values, send_on: sendOn, event_date: eventDate,
     excluded_tags: cleanTags_(b.excluded_tags, true) };
@@ -2253,6 +2250,18 @@ function previewBroadcast_(user, id) {
     out.missing = Object.keys(missing).map(function (k) { return k + ' is empty for ' + missing[k] + ' donor(s)'; });
     var r = resolveVars_(tpl, aud[0], msg, ctx);
     out.sample = { donor: aud[0].name, text: renderBody_(tpl, r.vars) };
+    if (MEDIA_TYPES[tpl.media_type]) {   // a media template: the file must be there and public
+      var fileVal = (b.values || {})[MEDIA_LABEL];
+      out.missing = out.missing.filter(function (x) { return x.indexOf('(' + MEDIA_LABEL + ')') < 0; });
+      if (!fileVal) out.missing.unshift('Add the attachment: paste the Google Drive share link of the ' + MEDIA_TYPES[tpl.media_type].label + ' under "Attachment".');
+      else {
+        try {
+          var fid = checkDriveMedia_(fileVal, tpl.media_type);
+          out.media = { type: tpl.media_type, file_id: fid, view_url: 'https://drive.google.com/file/d/' + fid + '/view', thumb_url: 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w400' };
+        } catch (e) { out.missing.unshift('Attachment: ' + e.message); }
+      }
+      out.email_note = 'Emails get the text only; the ' + MEDIA_TYPES[tpl.media_type].label.toLowerCase() + ' goes by WhatsApp.';
+    }
   }
   return out;
 }
@@ -2281,6 +2290,7 @@ function approveBroadcast_(user, id, opts) {
     if (!tpl) throw new ApiError('Choose a template first.');
     if (tpl.status !== 'approved') throw new ApiError('That template is not approved by WhatsApp yet.');
     if (tpl.message_type !== b.kind) throw new ApiError('That template is a "' + (MESSAGE_TYPES[tpl.message_type] || 'untyped') + '" template, not a "' + MESSAGE_TYPES[b.kind] + '".');
+    if (MEDIA_TYPES[tpl.media_type] && !(b.values || {})[MEDIA_LABEL]) throw new ApiError('This template sends a file. Add the attachment (a Google Drive share link) first.');
     var ctx = broadcastContext_(), donors = loadTable_('Donors'), aud = broadcastAudience_(b, donors, ctx.donations);
     if (!aud.length) throw new ApiError(broadcastAudience_(b, donors, ctx.donations, true).length ? 'Nobody in the audience has a WhatsApp or email opt-in.' : 'Nobody is in the audience.');
     aud = aud.filter(function (d) { return (byWa && waReady_(d)) || (byEmail && emailReady_(d)); });   // only the chosen channels
@@ -2333,7 +2343,7 @@ function listDonorMessages_(user, f) {
   f = f || {};
   var donors = {}; loadTable_('Donors').forEach(function (d) { donors[d.id] = d; });
   var tpls = {}; loadTable_('DonorTemplates').forEach(function (t) { tpls[t.id] = t; });
-  var rows = loadTable_('DonorMessages').filter(function (m) { return m.channel !== 'manual' && (!f.status || m.status === f.status); })   // logged conversations are not in the queue
+  var rows = loadTable_('DonorMessages').filter(function (m) { return m.status && m.channel !== 'manual' && (!f.status || m.status === f.status); })   // logged conversations are not in the queue; a row without a status is a cleared leftover
     .sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); }).slice(0, 1000);   // the page shows them in pages
   return rows.map(function (m) {
     var o = cleanDonorRow_(m), d = donors[m.donor_id] || {};
@@ -2807,7 +2817,7 @@ function autoValue_(key, donor, msg, ctx) {
 /** {vars: {"1": "...", ...}, missing: ["{{2}} (label)"]} for one donor and message. */
 function resolveVars_(tpl, donor, msg, ctx) {
   var names = tpl.variable_names || [], typed = msg.variables || {}, vars = {}, missing = [];
-  placeholderNumbers_(tpl.body).forEach(function (n) {
+  templateVarNumbers_(tpl).forEach(function (n) {   // the body's placeholders, plus the file's for a media template
     var label = names[n - 1] || ('value ' + n), key = labelKey_(label);
     var v = autoValue_(key, donor, msg, ctx);
     if (v === undefined || v === null || String(v).trim() === '') {
@@ -2878,13 +2888,13 @@ function intoCallWindow_(d) {
 /** Roughly when the fallback will call this parent (for the UI). null if no call is planned. */
 function nextCallTime_(m, parent, campaignStatus, nowMs) {
   if (!voiceEnabled_()) return null; // WhatsApp-only mode: no calls are planned
-  if (campaignStatus === 'cancelled' || parent.opted_out || m.call_requested_at) return null;
+  if (campaignStatus === 'cancelled' || isDiscontinued_(parent) || m.call_requested_at) return null;
   var due;
   if (['sent', 'delivered', 'read'].indexOf(m.status) >= 0 && m.wa_sent_at) {
     var sent = Date.parse(m.wa_sent_at);
     if (nowMs - sent > MAX_AGE_MS) return null;
     due = sent + cfg_().CALL_FALLBACK_HOURS * 3600 * 1000;
-  } else if (m.status === 'failed' || (m.status === 'queued' && !parent.has_whatsapp)) {
+  } else if (m.status === 'failed') {
     due = nowMs;
   } else return null;
   return intoCallWindow_(new Date(Math.max(due, nowMs))).toISOString();
@@ -2897,15 +2907,12 @@ function findCandidates_() {
   return loadTable_('Messages').filter(function (m) {
     if (m.call_requested_at) return false;
     var p = parents[m.parent_id], c = camps[m.campaign_id];
-    if (!p || !c || p.opted_out || c.status === 'cancelled') return false;
+    if (!p || !c || isDiscontinued_(p) || c.status === 'cancelled') return false;
     if (['sent', 'delivered', 'read'].indexOf(m.status) >= 0) {
       var t = m.wa_sent_at ? Date.parse(m.wa_sent_at) : NaN;
       return t < cutoff && t > oldest; // WhatsApp delivered but no answer after CALL_FALLBACK_HOURS
     }
-    if (m.status === 'queued' || m.status === 'failed') {
-      var u = Date.parse(m.updated_at);
-      return u > oldest && (m.status === 'failed' || !p.has_whatsapp); // no WhatsApp / WhatsApp failed: call now
-    }
+    if (m.status === 'failed') return Date.parse(m.updated_at) > oldest; // WhatsApp failed: call now
     return false;
   }).map(function (m) { return { id: m.id, phone: parents[m.parent_id].phone_e164 }; });
 }
@@ -2959,15 +2966,18 @@ function runFallback_(deadline) {
 
 // ===== Parents.gs =====
 var BUILD_Parents = '20261107-1230'; // build stamp (see Build.gs)
-/** Parents: CSV upload, directory, edit, move, delete. */
-var REQUIRED_COLUMNS = ['parent_name', 'phone', 'institution', 'class_or_year', 'has_whatsapp'];
-// Languages the app has phone-call scripts for. Blank means English.
-var LANGUAGES = { en: 'en', english: 'en', hi: 'hi', hindi: 'hi', ta: 'ta', tamil: 'ta' };
-var TRUE_VALUES = ['true', 'yes', 'y', '1'];
-var FALSE_VALUES = ['false', 'no', 'n', '0'];
-var COLLEGE_YEARS = ['1', '2', '3', '4'];
+/**
+ * Parents: one row per child, filled only by CSV upload (no editing in the app).
+ * The CSV comes from Ek Tara. All ten columns are required; headers match ignoring case, spaces and punctuation.
+ * A row is matched on New Child ID: new IDs are added, known IDs are updated, nothing is ever deleted.
+ */
+var PARENT_COLUMNS = [   // [CSV header as Ek Tara writes it, field in the Parents sheet]
+  ['File Number', 'file_number'], ['New Child ID', 'id'], ['Father/Mother', 'parent_name'], ['Phone(Mobile)', 'phone'],
+  ['Name', 'child_name'], ['School Name', 'institution'], ['Type of Beneficiary', 'beneficiary_type'],
+  ['Status of Beneficiary', 'beneficiary_status'], ['Current Grade', 'class_or_year'], ['Current Section/Stream', 'section']
+];
 
-/** E.164 (default region India). Returns null if invalid. */
+/** E.164 (default region India). Returns null if invalid. (The donor side uses this too.) */
 function normalizePhone_(raw) {
   var s = String(raw || '').trim();
   var plus = s.charAt(0) === '+';
@@ -2984,55 +2994,33 @@ function normalizePhone_(raw) {
   return null;
 }
 
-function parseBool_(raw) {
-  var v = String(raw || '').trim().toLowerCase();
-  if (v === '') return true;
-  if (TRUE_VALUES.indexOf(v) >= 0) return true;
-  if (FALSE_VALUES.indexOf(v) >= 0) return false;
-  return null;
-}
+var PHONE_RULES = 'use a 10-digit Indian number that does not start with 0 or 1 (a 0, 91 or +91 in front is fine), ' +
+  'or a foreign number written with + and the country code, e.g. +44 7911 123456';
 
-/** Returns {level, section, error}. */
-function cleanLevel_(type, classOrYear, section) {
-  if (type === 'college') {
-    var digits = (classOrYear.match(/\d/g) || []).join('');
-    if (COLLEGE_YEARS.indexOf(digits) < 0) return { error: "college year must be 1, 2, 3 or 4, got '" + classOrYear + "'" };
-    if (section) return { error: 'colleges have no section; leave section empty' };
-    return { level: digits, section: null };
+/** "Phone (Mobile) " -> "phonemobile", so small differences in the CSV headers still match. */
+function headerKey_(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+function cleanText_(v) { return String(v || '').trim().split(/\s+/).join(' '); }
+
+/** Children with this status get no messages. */
+function isDiscontinued_(p) { return cleanText_(p && p.beneficiary_status).toLowerCase() === 'discontinued'; }
+
+/** Validate and normalise one CSV row. Returns {row} or {error}. */
+function cleanParent_(rec) {
+  var row = {};
+  for (var i = 0; i < PARENT_COLUMNS.length; i++) {
+    var v = cleanText_(rec[PARENT_COLUMNS[i][1]]);
+    if (!v) return { error: PARENT_COLUMNS[i][0] + ' is empty' };
+    row[PARENT_COLUMNS[i][1]] = v;
   }
-  var value = classOrYear.replace(/^(class|std|grade)\s*/i, '').trim();
-  if (!value) return { error: 'class_or_year is empty' };
-  return { level: value, section: section ? section.toUpperCase() : null };
+  var phone = normalizePhone_(row.phone);
+  if (!phone) return { error: "invalid phone number '" + row.phone + "': " + PHONE_RULES };
+  row.phone_e164 = phone;
+  delete row.phone;
+  return { row: row };
 }
 
-/** Validate and normalise one parent. Returns {row} or {error}. */
-function cleanParent_(f) {
-  var name = String(f.parent_name || '').trim();
-  var institution = String(f.institution || '').trim().split(/\s+/).join(' ');
-  var type = (String(f.institution_type || '').trim().toLowerCase()) || 'school';
-  var cy = String(f.class_or_year || '').trim();
-  if (!name) return { error: 'parent_name is empty' };
-  if (!institution) return { error: 'institution is empty (the school or college name)' };
-  if (type !== 'school' && type !== 'college') return { error: "institution_type must be school or college, got '" + type + "'" };
-  if (!cy) return { error: 'class_or_year is empty' };
-  var lv = cleanLevel_(type, cy, String(f.section || '').trim());
-  if (lv.error) return { error: lv.error };
-  var phoneRaw = String(f.phone || '').trim();
-  if (!phoneRaw) return { error: 'phone is empty' };
-  var phone = normalizePhone_(phoneRaw);
-  if (!phone) return { error: "invalid phone number '" + phoneRaw + "'" };
-  var langRaw = String(f.language || '').trim().toLowerCase();
-  var language = langRaw ? LANGUAGES[langRaw] : 'en';
-  if (!language) return { error: "language must be en, hi or ta (or English, Hindi, Tamil), got '" + String(f.language).trim() + "'" };
-  return {
-    row: {
-      parent_name: name, phone_e164: phone, child_name: String(f.child_name || '').trim() || null,
-      institution: institution, institution_type: type, class_or_year: lv.level, section: lv.section,
-      language: language
-    }
-  };
-}
-
+/** Is this child in the group? An empty institution / class / section means "any". */
 function inGroup_(r, institution, classOrYear, section) {
   if (institution && r.institution !== institution) return false;
   if (classOrYear && r.class_or_year !== classOrYear) return false;
@@ -3052,55 +3040,45 @@ function sortBy_(rows, keys) {
 }
 
 function uploadParents_(user, csvText) {
+  requireNewParentsTab_();
   var text = String(csvText || '').replace(/^\uFEFF/, '');
   var table;
   try { table = Utilities.parseCsv(text); } catch (e) { throw new ApiError('File must be a UTF-8 CSV'); }
   if (!table.length) throw new ApiError('The file is empty.');
-  var header = table[0].map(function (h) { return String(h).trim().toLowerCase(); });
-  var missing = REQUIRED_COLUMNS.filter(function (c) { return header.indexOf(c) < 0; });
+  var keys = table[0].map(headerKey_), col = {};
+  PARENT_COLUMNS.forEach(function (c) { col[c[1]] = keys.indexOf(headerKey_(c[0])); });
+  var missing = PARENT_COLUMNS.filter(function (c) { return col[c[1]] < 0; }).map(function (c) { return c[0]; });
   if (missing.length) throw new ApiError('Missing columns: ' + missing.join(', '));
 
-  var byPhone = {}, firstRow = {}, typeOf = {}, rejected = [];
+  var byId = {}, firstRow = {}, rejected = [];
   for (var i = 1; i < table.length; i++) {
     var cells = table[i], rowNumber = i + 1;
-    if (cells.length === 1 && String(cells[0]).trim() === '') continue; // blank line
+    if (cells.join('').trim() === '') continue; // blank line
     var rec = {};
-    header.forEach(function (h, j) { rec[h] = cells[j] === undefined ? '' : String(cells[j]); });
+    PARENT_COLUMNS.forEach(function (c) { rec[c[1]] = cells[col[c[1]]] === undefined ? '' : String(cells[col[c[1]]]); });
+    var bad = { row: rowNumber, parent_name: cleanText_(rec.parent_name) || null, phone: cleanText_(rec.phone) || null };
     var res = cleanParent_(rec);
-    if (res.error) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: res.error }); continue; }
-    if (!String(rec.has_whatsapp || '').trim()) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: 'has_whatsapp is empty; write yes or no' }); continue; }
-    var wa = parseBool_(rec.has_whatsapp);
-    if (wa === null) { rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: "has_whatsapp must be yes/no/true/false, got '" + rec.has_whatsapp + "'" }); continue; }
-    var p = res.row; p.has_whatsapp = wa;
-    var known = typeOf[p.institution];
-    if (known && known.type !== p.institution_type) {
-      rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: "'" + p.institution + "' is a " + known.type + ' in row ' + known.row });
-      continue;
-    }
-    if (byPhone[p.phone_e164]) {
-      rejected.push({ row: rowNumber, parent_name: rec.parent_name || null, phone: rec.phone || null, reason: 'duplicate phone, already in row ' + firstRow[p.phone_e164] });
-      continue;
-    }
-    byPhone[p.phone_e164] = p; firstRow[p.phone_e164] = rowNumber;
-    if (!typeOf[p.institution]) typeOf[p.institution] = { type: p.institution_type, row: rowNumber };
+    if (res.error) { bad.reason = res.error; rejected.push(bad); continue; }
+    var p = res.row;
+    if (byId[p.id]) { bad.reason = 'New Child ID ' + p.id + ' is already in row ' + firstRow[p.id]; rejected.push(bad); continue; }
+    byId[p.id] = p; firstRow[p.id] = rowNumber;
   }
 
   return withLock_(function () {
     var existing = {};
-    loadTable_('Parents').forEach(function (r) { existing[r.phone_e164] = r; });
+    loadTable_('Parents').forEach(function (r) { existing[r.id] = r; });
     var toUpdate = [], toInsert = [], rows = [], now = nowIso_();
-    Object.keys(byPhone).forEach(function (phone) {
-      var p = byPhone[phone], old = existing[phone];
+    Object.keys(byId).forEach(function (id) {
+      var p = byId[id], old = existing[id];
       if (old) {
-        // opted_out is never reset by a re-upload.
         Object.keys(p).forEach(function (k) { old[k] = p[k]; });
         old.updated_at = now;
         toUpdate.push(old);
       } else {
-        p.id = newId_(); p.opted_out = false; p.created_at = now; p.updated_at = now;
+        p.created_at = now; p.updated_at = now;
         toInsert.push(p);
       }
-      rows.push({ row: firstRow[phone], parent_name: p.parent_name, phone: phone, status: old ? 'updated' : 'added' });
+      rows.push({ row: firstRow[id], parent_name: p.parent_name, phone: p.phone_e164, status: old ? 'updated' : 'added' });
     });
     saveRows_('Parents', toUpdate);
     insertRows_('Parents', toInsert);
@@ -3109,23 +3087,23 @@ function uploadParents_(user, csvText) {
   });
 }
 
+/** Children who can be messaged, counted per school / grade / section / type (for the campaign page). */
 function listGroups_() {
+  requireNewParentsTab_();
   var groups = {};
   loadTable_('Parents').forEach(function (r) {
-    if (r.opted_out) return;
-    var key = [r.institution, r.class_or_year, r.section || ''].join('\u0001');
+    if (isDiscontinued_(r)) return;
+    var key = [r.institution, r.class_or_year, r.section || '', r.beneficiary_type || ''].join('\u0001');
     var g = groups[key] || (groups[key] = {
-      institution: r.institution, institution_type: r.institution_type, class_or_year: r.class_or_year,
-      section: r.section, parent_count: 0, whatsapp_count: 0, languages: {}
+      institution: r.institution, class_or_year: r.class_or_year, section: r.section, beneficiary_type: r.beneficiary_type, parent_count: 0
     });
     g.parent_count++;
-    if (r.has_whatsapp) g.whatsapp_count++;
-    g.languages[r.language] = (g.languages[r.language] || 0) + 1;
   });
-  return sortBy_(Object.keys(groups).map(function (k) { return groups[k]; }), ['institution', 'class_or_year', 'section']);
+  return sortBy_(Object.keys(groups).map(function (k) { return groups[k]; }), ['institution', 'class_or_year', 'section', 'beneficiary_type']);
 }
 
 function listParents_(user, f) {
+  requireNewParentsTab_();
   f = f || {};
   var parents = loadTable_('Parents').filter(function (r) { return inGroup_(r, f.institution, f.class_or_year, f.section); });
   var stats = {};
@@ -3142,72 +3120,6 @@ function listParents_(user, f) {
     p.stats = stats[p.id] || { total: 0, responded: 0, flagged: 0 };
     delete p._row;
     return p;
-  });
-}
-
-function updateParent_(user, id, body) {
-  var res = cleanParent_(body);
-  if (res.error) throw new ApiError(res.error);
-  return withLock_(function () {
-    var parent = findOne_('Parents', 'id', id);
-    if (!parent) throw new ApiError('Parent not found', null, 404);
-    var clash = findBy_('Parents', 'phone_e164', res.row.phone_e164).filter(function (r) { return r.id !== id; });
-    if (clash.length) throw new ApiError('Another parent already has this phone number.');
-    Object.keys(res.row).forEach(function (k) { parent[k] = res.row[k]; });
-    parent.has_whatsapp = !!body.has_whatsapp;
-    parent.opted_out = !!body.opted_out;
-    parent.updated_at = nowIso_();
-    saveRows_('Parents', [parent]);
-    delete parent._row;
-    return parent;
-  });
-}
-
-/**
- * Removes parents. Their messages stay, so past campaigns keep their counts (the parent shows as "(deleted)").
- * Messages not sent yet are cancelled, since there is no one left to send them to.
- */
-function deleteParentsWhere_(pred) {
-  var parents = loadTable_('Parents');
-  var doomed = {}, keep = [], n = 0;
-  parents.forEach(function (p) { if (pred(p)) { doomed[p.id] = true; n++; } else keep.push(p); });
-  if (!n) return 0;
-  replaceTable_('Parents', keep);
-  var unsent = loadTable_('Messages').filter(function (m) { return doomed[m.parent_id] && transition_(m, 'cancelled'); });
-  saveRows_('Messages', unsent);
-  return n;
-}
-
-function deleteParent_(user, id) {
-  return withLock_(function () {
-    var n = deleteParentsWhere_(function (p) { return p.id === id; });
-    if (!n) throw new ApiError('Parent not found', null, 404);
-    return { deleted: 1 };
-  });
-}
-
-function moveGroup_(user, body) {
-  var s = body.source || {};
-  if (!String(s.institution || '').trim()) throw new ApiError('Choose a school or college.');
-  if (!s.class_or_year) throw new ApiError('Choose the class or year to move.');
-  return withLock_(function () {
-    var rows = loadTable_('Parents').filter(function (r) { return inGroup_(r, s.institution, s.class_or_year, s.section); });
-    if (!rows.length) throw new ApiError('No parents in this group.', null, 404);
-    var lv = cleanLevel_(rows[0].institution_type, String(body.class_or_year || '').trim(), String(body.section || '').trim());
-    if (lv.error) throw new ApiError(lv.error);
-    rows.forEach(function (r) {
-      r.class_or_year = lv.level;
-      if (s.section) r.section = lv.section; // a whole class keeps each parent's section
-    });
-    saveRows_('Parents', rows);
-    return { moved: rows.length };
-  });
-}
-
-function deleteGroup_(user, body) {
-  if (!String(body.institution || '').trim()) throw new ApiError('Choose a school or college.');
-  return withLock_(function () {
-    return { deleted: deleteParentsWhere_(function (p) { return inGroup_(p, body.institution, body.class_or_year, body.section); }) };
   });
 }
 
@@ -3404,11 +3316,12 @@ function findRepliedMessageId_(params) {
     var m = findOne_('Messages', 'wa_sid', params.OriginalRepliedMessageSid);
     if (m) return m.id;
   }
-  // Otherwise: the parent's most recent open message from the last 7 days.
-  var parent = findOne_('Parents', 'phone_e164', phoneOf_(params));
-  if (!parent) return null;
-  var since = Date.now() - REPLY_WINDOW_MS;
-  var open = findBy_('Messages', 'parent_id', parent.id).filter(function (m) {
+  // Otherwise (typed reply): the most recent open message from the last 7 days to any child on this phone.
+  var children = findBy_('Parents', 'phone_e164', phoneOf_(params));
+  if (!children.length) return null;
+  var since = Date.now() - REPLY_WINDOW_MS, msgs = [];
+  children.forEach(function (c) { msgs = msgs.concat(findBy_('Messages', 'parent_id', c.id)); });
+  var open = msgs.filter(function (m) {
     return ['sent', 'delivered', 'read', 'flagged'].indexOf(m.status) >= 0 && m.wa_sent_at && Date.parse(m.wa_sent_at) >= since;
   }).sort(function (a, b) { return String(b.wa_sent_at).localeCompare(String(a.wa_sent_at)); });
   return open.length ? open[0].id : null;
@@ -3418,10 +3331,7 @@ function findRepliedMessageId_(params) {
 function handleInbound_(params, eventId) {
   var optOut = optOutChoice_(params);
   if (optOut !== null) {
-    // Opted-out parents get no WhatsApp and no calls (sender and fallback check this).
-    findBy_('Parents', 'phone_e164', phoneOf_(params)).forEach(function (p) {
-      p.opted_out = optOut; saveRows_('Parents', [p]);
-    });
+    // STOP / START only changes donors; parents have no opt-out.
     if (donorReady_()) donorOptOutChoice_(params, optOut);
     return;
   }
@@ -3476,12 +3386,11 @@ var BATCH_SIZE = 50;
 function eligibleToSend_(m, parentsById, nowMs) {
   var p = parentsById[m.parent_id];
   if (m.status !== 'queued' || !p) return false;
-  if (!p.opted_out && !p.has_whatsapp) return false; // stays queued; the fallback call handles them
   var claimed = m.send_claimed_at ? Date.parse(m.send_claimed_at) : 0;
   return !claimed || nowMs - claimed > CLAIM_EXPIRES_MS;
 }
 
-/** Under lock: pick up to `max` messages, cancel opted-out ones, mark the rest claimed. */
+/** Under lock: pick up to `max` messages, cancel those of children marked Discontinued since, mark the rest claimed. */
 function claimBatch_(campaignId, max) {
   return withLock_(function () {
     var campaign = findOne_('Campaigns', 'id', campaignId);
@@ -3491,7 +3400,7 @@ function claimBatch_(campaignId, max) {
     loadTable_('Messages').forEach(function (m) {
       if (m.campaign_id !== campaignId || m.status !== 'queued') return;
       var p = parents[m.parent_id];
-      if (p && p.opted_out) { transition_(m, 'cancelled'); dirty.push(m); return; }
+      if (p && isDiscontinued_(p)) { transition_(m, 'cancelled'); dirty.push(m); return; }
       if (!eligibleToSend_(m, parents, now)) return;
       if (items.length >= max) { remaining++; return; }
       m.send_claimed_at = nowIso_();
@@ -3668,7 +3577,6 @@ function onOpen() {
       .addItem('Show Twilio webhook URLs', 'showWebhookUrls')
       .addItem('Check configuration', 'checkConfig')
       .addItem('Run cron tick now', 'cronTick')
-      .addItem('Tidy donor sheet columns', 'tidyDonorSheets')
       .addToUi();
   } catch (e) { /* not bound to a spreadsheet */ }
 }
@@ -3705,15 +3613,66 @@ function ensureFile_(file) {
 }
 
 /**
+ * A donor tab whose columns are not in SCHEMA order (for example one made by an older version that had more columns):
+ * rewrites it in SCHEMA order, matching columns by header name. Nothing is lost: columns the app no longer uses go to the
+ * right of the app's columns with their data, and a copy of the tab is kept first as a backup. Returns a note for the log.
+ */
+function reorderDonorTab_(ss, sh, name) {
+  return withLock_(function () {
+    var lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
+    if (!lastCol || lastRow < 1) return null;
+    var range = sh.getRange(1, 1, lastRow, lastCol), vals = range.getValues(), shown = range.getDisplayValues();
+    var keys = vals[0].map(donorHeaderKey_), seen = {};
+    for (var k = 0; k < keys.length; k++) {
+      if (!keys[k]) continue;
+      if (seen[keys[k]]) return 'The "' + name + '" tab has the column "' + vals[0][k] + '" twice, so it was not reordered. Remove one, then run setup again.';
+      seen[keys[k]] = true;
+    }
+    var want = fieldNames_(name), from = want.map(function (f) { return keys.indexOf(f); });   // -1: a new column, starts empty
+    var extras = [];
+    keys.forEach(function (key, j) {
+      if (want.indexOf(key) >= 0) return;
+      var hasData = vals.some(function (r, i) { return i > 0 && r[j] !== '' && r[j] !== null; });
+      if (key || hasData) extras.push(j);   // an old column the app no longer uses: kept, to the right
+    });
+    var order = from.concat(extras), width = order.length;
+    var out = vals.map(function (r, i) {
+      return order.map(function (j, c) {
+        if (i === 0) return c < want.length ? want[c] : r[j];
+        if (j < 0) return '';
+        return r[j] instanceof Date ? shown[i][j] : r[j];   // keep a date exactly as the sheet shows it
+      });
+    });
+    var backup = sh.copyTo(ss).setName(name + ' (before reorder ' + Utilities.formatDate(new Date(), cfg_().APP_TIMEZONE, 'yyyy-MM-dd HHmm') + ')');
+    sh.clearContents();
+    if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+    sh.getRange(1, 1, sh.getMaxRows(), width).setNumberFormat('@');
+    sh.getRange(1, 1, out.length, width).setValues(out);
+    sheetCache_ = {};
+    var kept = extras.map(function (j) { return String(vals[0][j] || '(no header)'); });
+    return 'The "' + name + '" tab was put into the app’s column order (a copy is kept as "' + backup.getName() + '").' +
+      (kept.length ? ' Columns the app no longer uses were kept on the right: ' + kept.join(', ') + '.' : '');
+  });
+}
+
+/**
  * Run once (and again after updates). Creates the three Google Sheets (parent, donor, access), their tabs, the first administrator,
  * and moves anything left in the old single file into the right file. Safe to run again.
  */
 function setup() {
   var files = { parent: ensureDatabaseSheet_(), donor: ensureFile_('donor'), access: ensureFile_('access') };
+  var parentsNote = retireOldParentsSheet_(files.parent);
+  var layoutNotes = [];
   Object.keys(SCHEMA).forEach(function (name) {
     var ss = files[FILE_OF[name]], cols = SCHEMA[name], sh = ss.getSheetByName(name) || ss.insertSheet(name);
-    if (byHeader_(name)) {   // donor tabs are read by header: keep their columns and order, only add what is missing
-      removeDonorColumns_(sh, name); donorHeaders_(sh, name); sh.setFrozenRows(1); return;
+    if (FILE_OF[name] === 'donor' && sh.getLastRow() > 1) {   // donor data in another column order: never relabel it, the data would no longer match
+      var bad = donorLayoutProblem_(sh, name, true);
+      if (bad) {   // e.g. a sheet made by an older version: move the columns into the app's order by their header names (nothing is lost)
+        var moved = reorderDonorTab_(ss, sh, name);
+        if (moved) layoutNotes.push(moved);
+        bad = donorLayoutProblem_(sh, name, true);
+      }
+      if (bad) { layoutNotes.push(bad + ' Left as it is. Move its columns back into the app’s order, then run setup again.'); return; }
     }
     if (sh.getMaxColumns() < cols.length) sh.insertColumnsAfter(sh.getMaxColumns(), cols.length - sh.getMaxColumns());
     sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@'); // plain text everywhere
@@ -3728,7 +3687,8 @@ function setup() {
   if (!props.getProperty('WEBHOOK_SECRET')) props.setProperty('WEBHOOK_SECRET', (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''));
   sheetCache_ = {};
 
-  var notes = migrateToSeparateFiles_(files);
+  var notes = layoutNotes.concat(migrateToSeparateFiles_(files));
+  if (parentsNote) notes.push(parentsNote);
   // The person who runs setup is the project owner: permanently the master administrator (kept in a Script property, not a sheet).
   var me = (Session.getEffectiveUser().getEmail() || Session.getActiveUser().getEmail() || '').toLowerCase();
   if (me && !props.getProperty('OWNER_EMAIL')) props.setProperty('OWNER_EMAIL', me);
@@ -3742,6 +3702,18 @@ function setup() {
   if (notes.length) console.log('Notes:\n- ' + notes.join('\n- '));
   toast_('Three files are ready (parent, donor, access). Next: set Script properties, deploy twice, install triggers (see SETUP.md).');
   return checkConfig();
+}
+
+/**
+ * The Parents tab changed to Ek Tara's columns (one row per child, keyed on New Child ID). Old rows can't be converted,
+ * so an old-style tab is renamed and kept as a backup, and setup creates a fresh one. Returns a note for the log, or null.
+ */
+function retireOldParentsSheet_(ss) {
+  var sh = ss.getSheetByName('Parents');
+  if (!sh || parentsHeaderOk_(sh)) return null;
+  var name = 'Parents (old ' + Utilities.formatDate(new Date(), cfg_().APP_TIMEZONE, 'yyyy-MM-dd HHmm') + ')';
+  sh.setName(name);
+  return 'The old Parents tab was renamed to "' + name + '" and kept as a backup. Upload Ek Tara\u2019s file on the Parent Info page to fill the new one. Old campaigns still show who they went to.';
 }
 
 /**
@@ -4166,8 +4138,9 @@ function importTwilioTemplates_(user, opts) {
     contents.forEach(function (c) {
       var ar = c.approval_requests || {}, label = ar.name || c.friendly_name || c.sid;
       if (bySid[c.sid]) { skipped.push({ name: label, reason: 'already in the app' }); return; }
-      var types = c.types || {}, kind = types['twilio/text'] ? 'twilio/text' : types['twilio/quick-reply'] ? 'twilio/quick-reply' : null;
-      if (!kind || !types[kind].body) { skipped.push({ name: label, reason: 'unsupported type (only text and quick-reply templates are imported)' }); return; }
+      var types = c.types || {}, kind = types['twilio/text'] ? 'twilio/text' : types['twilio/quick-reply'] ? 'twilio/quick-reply' :
+        (tbl === 'DonorTemplates' && types['twilio/media']) ? 'twilio/media' : null;   // media templates: donor side only
+      if (!kind || !types[kind].body) { skipped.push({ name: label, reason: 'unsupported type (only text and quick-reply templates' + (tbl === 'DonorTemplates' ? ', and image/PDF templates,' : '') + ' are imported)' }); return; }
       var name = String(ar.name || c.friendly_name || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       var language = c.language || '';
       if (!name) { skipped.push({ name: label, reason: 'no usable name' }); return; }
@@ -4189,13 +4162,23 @@ function importTwilioTemplates_(user, opts) {
       var body = String(types[kind].body), nums = placeholderNumbers_(body), vars = c.variables || {};
       var names = nums.map(function (n) { return 'value ' + n; }), samples = {};
       nums.forEach(function (n) { samples[String(n)] = String(vars[String(n)] || 'sample'); });
+      var mediaType = null;
+      if (kind === 'twilio/media') {   // the address must be the app's Drive address with the file's placeholder at the end
+        var murl = String((types[kind].media || [])[0] || ''), mm = /\{\{(\d+)\}\}\s*$/.exec(murl);
+        if (!mm || murl.slice(0, murl.lastIndexOf('{{')) !== DRIVE_MEDIA_URL || Number(mm[1]) !== nums.length + 1) {
+          skipped.push({ name: label, reason: 'its file address is not ' + DRIVE_MEDIA_URL + '{{' + (nums.length + 1) + '}}, so the app cannot fill in the file' }); return;
+        }
+        names.push(MEDIA_LABEL); samples[mm[1]] = String(vars[mm[1]] || 'sample');
+        mediaType = 'image';   // Twilio does not say which; correct it under Type & labels if it is a PDF
+      }
       var ids = (types[kind].actions || []).map(function (a) { return String(a.id || '').toLowerCase(); });
       var confirmButtons = kind === 'twilio/quick-reply' && ids.indexOf('confirm') >= 0 && ids.indexOf('decline') >= 0;
       taken[name + '|' + language] = true;
       toInsert.push({ id: newId_(), name: name, language: language, category: cat, body: body, variable_names: names, sample_values: samples,
         has_confirm_buttons: confirmButtons, status: status, twilio_content_sid: c.sid,
         rejection_reason: status === 'rejected' ? (ar.rejection_reason || 'Rejected by WhatsApp') : null,
-        requested_by: user.email, decision_seen: true, created_at: now, updated_at: now, division: tbl === 'DonorTemplates' ? 'donor' : 'parent' });
+        requested_by: user.email, decision_seen: true, created_at: now, updated_at: now, division: tbl === 'DonorTemplates' ? 'donor' : 'parent', media_type: mediaType });
+      if (mediaType) skipped.push({ name: label, reason: 'imported as an Image template; if it sends a PDF, change it under Type & labels' });
       if (kind === 'twilio/quick-reply' && !confirmButtons)
         skipped.push({ name: label, reason: 'imported, but its buttons are not Confirm/Decline (ids "confirm" and "decline"), so taps will not be recorded as answers' });
     });
@@ -4354,6 +4337,10 @@ function contentRequest_(method, path, json) {
 }
 
 function createContent_(t) {
+  if (MEDIA_TYPES[t.media_type]) {   // donor media template: the file address ends with its placeholder
+    return contentRequest_('post', '/Content', { friendly_name: t.name, language: t.language, variables: t.sample_values,
+      types: { 'twilio/media': { body: t.body, media: [DRIVE_MEDIA_URL + '{{' + mediaVarNumber_(t) + '}}'] } } }).sid;
+  }
   var types = t.has_confirm_buttons
     ? { 'twilio/quick-reply': { body: t.body, actions: [{ title: 'Confirm', id: 'confirm' }, { title: "Can't attend", id: 'decline' }] } }
     : { 'twilio/text': { body: t.body } };
@@ -4502,10 +4489,10 @@ function processEvent_(eventId, source, params, messageId) {
 function loadCallContext_(messageId) {
   var m = messageId ? findOne_('Messages', 'id', messageId) : null;
   if (!m) return { script: getVoiceScript_('en'), details: '' };
-  var parent = findOne_('Parents', 'id', m.parent_id), camp = findOne_('Campaigns', 'id', m.campaign_id);
+  var camp = findOne_('Campaigns', 'id', m.campaign_id);
   var vars = (camp && camp.variables) || {};
   var details = Object.keys(vars).sort(function (a, b) { return Number(a) - Number(b); }).map(function (k) { return vars[k]; }).join(', ');
-  return { script: getVoiceScript_(parent ? parent.language : 'en'), details: details };
+  return { script: getVoiceScript_('en'), details: details };   // parents no longer have a language
 }
 
 function gatherTwiml_(messageId, script, details, attempt, prefix) {
