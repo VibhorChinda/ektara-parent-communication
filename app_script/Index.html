@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ek Tara Communications</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Hanken+Grotesk:wght@400..700&display=swap" rel="stylesheet">
+<meta name="color-scheme" content="light dark">
+<script>
+  // If anything stops the app from starting, say so on screen instead of leaving a blank page.
+  (function () {
+    var shown = false;
+    function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+    function show(msg) {
+      if (shown) return; shown = true;
+      var d = document.createElement('div'); d.id = 'bootfail'; d.setAttribute('role', 'alert');
+      d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:#7f1d1d;color:#fff;padding:14px 16px;border-radius:10px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)';
+      d.innerHTML = '<b>The app hit a problem while starting.</b><br>' + esc(msg) + '<br><span style="opacity:.85">Try Ctrl+Shift+R. If it continues, add <b>?diag=1</b> to the end of this page\u2019s address, open it, and send what it shows to the project owner.</span>';
+      (document.body || document.documentElement).appendChild(d);
+    }
+    window.__bootFail = show;
+    window.addEventListener('error', function (e) { show((e.message || 'Script error') + (e.filename ? ' (' + String(e.filename).split('/').pop() + ':' + e.lineno + ')' : '')); });
+    window.addEventListener('unhandledrejection', function (e) { show((e.reason && e.reason.message) || e.reason); });
+  })();
+</script>
+<script>
+  (function () {
+    var m = 'auto'; try { m = localStorage.getItem('ektara-theme') || 'auto'; } catch (e) {}
+    var dark = m === 'dark' || (m === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.mode = m;
+  })();
+</script>
+<?!= include_('Styles'); ?>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div id="topbar" aria-hidden="true"><i></i></div>
+<div id="splash" role="status" aria-label="Loading Ek Tara">
+  <div class="sp-in">
+    <svg class="string lg" viewBox="0 0 120 40" aria-hidden="true" focusable="false"><circle cx="6" cy="20" r="3"/><circle cx="114" cy="20" r="3"/><path d="M6 20 Q60 20 114 20"><animate attributeName="d" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.1;.22;.34;.47;.6;.74;.88;1" keySplines=".37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1;.37 0 .63 1" values="M6 20 Q60 38 114 20;M6 20 Q60 2 114 20;M6 20 Q60 32 114 20;M6 20 Q60 8 114 20;M6 20 Q60 27 114 20;M6 20 Q60 13 114 20;M6 20 Q60 22 114 20;M6 20 Q60 20 114 20;M6 20 Q60 20 114 20"/></path></svg>
+    <div class="sp-word">Ek Tara</div>
+    <div class="sp-sub">Opening your workspace</div>
+  </div>
+</div>
+<header><div class="bar">
+  <span class="logo"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--acc)"/><path d="M6 17 Q16 6 26 17" fill="none" stroke="var(--acc-ink)" stroke-width="2.6" stroke-linecap="round"/><circle cx="6" cy="17" r="2.2" fill="var(--acc-ink)"/><circle cx="26" cy="17" r="2.2" fill="var(--acc-ink)"/></svg><span>Ek Tara</span></span>
+  <span class="divbadge" id="divbadge" hidden></span>
+  <nav class="tabs" id="nav" hidden aria-label="Parent Communication"></nav>
+  <nav class="tabs" id="dnav" hidden aria-label="Donor Communication"></nav>
+  <div class="tools">
+    <button class="kbtn" id="cmdbtn" aria-label="Search or jump to" title="Search or jump to (Ctrl K)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to</span><kbd>Ctrl K</kbd></button>
+    <button class="btn small" id="switch" hidden title="Switch division" aria-label="Switch division"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg>Switch division</button>
+    <button class="ibtn" id="adminbtn" hidden aria-label="Users and access" title="Users and access"></button>
+    <button class="ibtn" id="themebtn" aria-label="Change theme" title="Change theme"></button>
+    <span class="me" title="<?= userEmail ?>"><span class="avatar" id="avatar"></span><span class="me-email"><?= userEmail ?></span></span>
+  </div>
+</div></header>
+<main id="main" tabindex="-1" aria-live="polite"><div class="visually-hidden" role="status">Loading</div></main>
+<footer id="foot">
+  <div class="foot-in">
+    <div class="foot-brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--acc)"/><path d="M6 17 Q16 6 26 17" fill="none" stroke="var(--acc-ink)" stroke-width="2.6" stroke-linecap="round"/><circle cx="6" cy="17" r="2.2" fill="var(--acc-ink)"/><circle cx="26" cy="17" r="2.2" fill="var(--acc-ink)"/></svg><div>Ek Tara Communications<small id="foot-div">Parent and donor communication</small></div></div>
+    <div class="foot-meta"><span id="foot-status" class="dot">Connected</span><span>Signed in as <b id="foot-user"><?= userEmail ?></b></span></div>
+    <div class="foot-actions"><button class="link" id="f-keys">Keyboard shortcuts</button><button class="link" id="f-theme">Theme: Auto</button><button class="link" id="f-switch" hidden>Switch division</button></div>
+    <p class="foot-note">Parent and donor records are visible only to people with access. Records live in your organisation&rsquo;s Google Sheet. &copy; <span id="foot-year"></span> Ek Tara. <span class="muted" id="foot-build" title="Which version of the app is running"></span></p>
+  </div>
+</footer>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<script>
+// Values the server fills in. They stay here: scriptlets do not run inside the included files.
+const REQUESTED = '<?= requestedDivision ?>';
+const LOGO = '<?!= logo ?>';
+</script>
+<?!= include_('JsCore'); ?>
+<?!= include_('JsParent'); ?>
+<?!= include_('JsDonor'); ?>
+<?!= include_('JsAdmin'); ?>
+<script>
+// ---------- boot (after every file above has loaded) ----------
+applyLogo();
+initChrome();
+showLanding({}).then(hideSplash, hideSplash);
+setTimeout(() => { if (document.getElementById('splash') && !document.getElementById('splash').classList.contains('out')) window.__bootFail('The server has not answered after ' + Math.round(BOOT_WATCH_MS / 1000) + ' seconds. Check that both deployments use the newest version.'); }, BOOT_WATCH_MS);
+</script>
+</body>
+</html>
