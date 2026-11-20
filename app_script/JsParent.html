@@ -243,7 +243,7 @@ async function campaignDetail(id, statusFilter) {
     try { const r = await call('campaigns.retryFailed', id); toast(r.retried + ' messages queued again'); await driveSend(id); } catch (e) { toast(e.message, true); } reload();
   };
   if ($('#stop')) $('#stop').onclick = () => {
-    const m = modal('<h2>Stop this campaign?</h2><p>Unsent messages are cancelled and no more fallback calls are placed. Messages already delivered stay, and parents can still reply.</p><div class="actions"><button class="btn" id="no">Keep going</button><button class="btn danger" id="yes">Stop campaign</button></div>');
+    const m = modal('<h2>Stop this campaign?</h2><p>Unsent messages are cancelled. Messages already delivered stay, and parents can still reply.</p><div class="actions"><button class="btn" id="no">Keep going</button><button class="btn danger" id="yes">Stop campaign</button></div>');
     $('#no', m).onclick = m.close;
     $('#yes', m).onclick = async () => { m.close(); try { const r = await call('campaigns.cancel', id); toast(r.stopped + ' messages cancelled'); } catch (e) { toast(e.message, true); } reload(); };
   };
@@ -264,11 +264,8 @@ function templateText(c) {
   return b;
 }
 function messageDetails(m) {
-  if (m.status === 'confirmed' || m.status === 'declined') return m.confirmed_via === 'admin' ? 'Recorded by an admin' : m.confirmed_via === 'voice' ? 'Answered on the phone call' : 'Answered on WhatsApp';
+  if (m.status === 'confirmed' || m.status === 'declined') return m.confirmed_via === 'admin' ? 'Recorded by an admin' : 'Answered on WhatsApp';
   if (m.status === 'cancelled') return m.parents.deleted ? 'Parent deleted before sending' : /^discontinued$/i.test(String(m.parents.beneficiary_status || '').trim()) ? 'Child marked Discontinued' : 'Campaign stopped before sending';
-  if (m.call_status) return 'Call: ' + m.call_status.replace('-', ' ');
-  if (m.call_requested_at) return 'Calling now';
-  if (m.call_due_at) return (m.wa_error ? m.wa_error + ' ' : '') + 'Call ' + callTime(m.call_due_at);
   if (m.wa_error) return m.wa_error;
   if (m.status === 'read') return 'Read, no reply yet';
   return '';
@@ -278,8 +275,6 @@ function eventSummary(e) {
   switch (e.source) {
     case 'whatsapp_status': return 'WhatsApp: ' + (p.MessageStatus || '?') + (p.ErrorCode ? ' (error ' + p.ErrorCode + ')' : '');
     case 'whatsapp_inbound': return (p.ButtonPayload ? 'Tapped' : 'Replied') + ' \u201c' + (p.Body || '') + '\u201d' + (p.recovered ? ' (recovered)' : '');
-    case 'voice_gather': return 'Pressed ' + (p.Digits || 'nothing');
-    case 'voice_status': return 'Call ' + (p.CallStatus || '?') + (p.CallDuration ? ', ' + p.CallDuration + ' s' : '');
     case 'admin': return 'Marked ' + p.outcome + ' by ' + p.by;
     case 'cron': return p.error ? 'Error: ' + p.error : p.recheck_status ? 'Status re-checked with Twilio: ' + p.recheck_status : 'Background job';
     default: return e.source;
@@ -305,7 +300,7 @@ const SAMPLE_CSV = 'File Number,New Child ID,Father/Mother,Phone(Mobile),Name,Sc
   'F-101,C0001,Asha Rao,98765 43210,Riya Rao,Sunrise Public School,Scholarship,Active,7,B\n' +
   'F-101,C0002,Asha Rao,98765 43210,Aman Rao,Sunrise Public School,Scholarship,Active,4,A\n' +
   'F-102,C0003,Meera Iyer,98400 12345,Karthik Iyer,City Junior College,Mentorship,Active,12,Science\n';
-const REPLIES_HELP = 'Replies: how many messages about this child were answered (on WhatsApp, on the phone call, or recorded by staff), out of how many were sent. Red means someone should follow up personally.';
+const REPLIES_HELP = 'Replies: how many messages about this child were answered (on WhatsApp, or recorded by staff), out of how many were sent. Red means someone should follow up personally.';
 const PHONE_HELP = 'Phone(Mobile): a 10-digit Indian number that does not start with 0 or 1 (a 0, 91 or +91 in front is fine). ' +
   'Foreign numbers need + and the country code, e.g. +44 7911 123456; without the +, a foreign number is rejected or read as an Indian one. ' +
   'A number that is not on WhatsApp is accepted here but its message shows as Failed when sent.';
@@ -319,16 +314,25 @@ function repliesHtml(s) {
 // The BOM makes Excel read the file as UTF-8.
 function sampleCsvHref() { return 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + SAMPLE_CSV); }
 
-/** One line per CSV row: Added, Updated or Rejected (with the reason). */
+/** The upload result: one summary line, plus a button to download the rejected rows (no table on screen, however big the file). */
 function uploadResultHtml(r) {
-  const STATUS = { added: ['confirmed', 'Added'], updated: ['sent', 'Updated'], rejected: ['failed', 'Rejected'] };
-  const lines = (r.rows || []).map(x => ({ row: x.row, name: x.parent_name, phone: x.phone, status: x.status, reason: '' }))
-    .concat((r.errors || []).map(e => ({ row: e.row, name: e.parent_name || '', phone: e.phone || '', status: 'rejected', reason: e.reason })))
-    .sort((a, b) => a.row - b.row);
-  return '<div class="card"><b>Latest upload: ' + r.inserted + ' added, ' + r.updated + ' updated, ' + r.rejected + ' rejected.</b>' +
-    (lines.length ? '<div class="scroll"><table><thead><tr><th>CSV row</th><th>Parent</th><th>Phone</th><th>Status</th><th>Reason</th></tr></thead><tbody>' +
-      lines.map(x => '<tr><td>' + x.row + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.phone) + '</td><td><span class="badge b-' + STATUS[x.status][0] + '">' + STATUS[x.status][1] + '</span></td><td class="small muted">' + esc(x.reason) + '</td></tr>').join('') +
-      '</tbody></table></div>' : '') + '</div>';
+  const errs = (r.errors || []).slice().sort((a, b) => a.row - b.row);
+  return '<div class="card" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">' +
+    '<b>Latest upload: ' + r.inserted + ' added, ' + r.updated + ' updated, ' + (r.unchanged || 0) + ' unchanged, ' + r.rejected + ' rejected.</b>' +
+    (errs.length ? '<a class="btn" style="text-decoration:none" download="parents_rejected_' + new Date().toISOString().slice(0, 10) + '.csv" href="' + rejectedCsvHref(r, errs) +
+      '" title="The rejected rows as they were in your file, with the reason. Fix them in Excel and upload the file again.">Download rejected rows (' + errs.length + ')</a>' : '') + '</div>';
+}
+
+/**
+ * The rejected rows as a CSV: the upload's 10 columns with the values exactly as they were in the file, then the reason and the original row number.
+ * The upload ignores the two extra columns, so the fixed file can be uploaded again as it is. Built in the browser; nothing is stored.
+ */
+function rejectedCsvHref(r, errs) {
+  const cols = (r.columns && r.columns.length ? r.columns : SAMPLE_CSV.split('\n')[0].split(','));
+  const cell = v => { v = v == null ? '' : String(v); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lines = [cols.concat(['Rejection reason', 'CSV row']).map(cell).join(',')]
+    .concat(errs.map(e => (e.cells || cols.map(() => '')).concat([e.reason || '', e.row]).map(cell).join(',')));
+  return 'data:text/csv;charset=utf-8,' + encodeURIComponent('﻿' + lines.join('\r\n') + '\r\n');   // the BOM makes Excel read it as UTF-8
 }
 
 views.parents = async function () {

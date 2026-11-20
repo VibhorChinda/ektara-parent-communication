@@ -170,12 +170,6 @@ function statusTime(iso) {
   const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
   return w.toDateString() === new Date().toDateString() ? t : w.toLocaleDateString(undefined, { day:'numeric', month:'short' }) + ', ' + t;
 }
-function callTime(iso) {
-  const w = new Date(iso), t = w.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }), n = new Date(), tm = new Date(n); tm.setDate(n.getDate() + 1);
-  if (w.toDateString() === n.toDateString()) return 'around ' + t + ' today';
-  if (w.toDateString() === tm.toDateString()) return 'around ' + t + ' tomorrow';
-  return 'around ' + t + ', ' + w.toLocaleDateString(undefined, { day:'numeric', month:'short' });
-}
 const money = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style:'currency', currency:cur, maximumFractionDigits:0 }).format(n); } catch (e) { return Math.round(n) + ' ' + cur; } };
 const LABELS = { pending_meta:'Pending Meta', flagged:'Needs follow-up', awaiting_confirmation:'Awaiting trustee', held:'Held', skipped:'Skipped' };
 const label = s => LABELS[s] || (s.charAt(0).toUpperCase() + s.slice(1));

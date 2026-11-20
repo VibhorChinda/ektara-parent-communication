@@ -730,8 +730,15 @@ function importDonorTemplates_(user) {
 // ---------- broadcasts (T8 general, T11 special, T12 festive). T4 campaign updates were removed. ----------
 var BROADCAST_KINDS = { general_update: 'T8', special_update: 'T11', festive_greeting: 'T12' };
 
+/**
+ * A broadcast's kind comes from its template's type: General update (T8), Special update (T11) or Festive greeting (T12).
+ * A template of another type ("A year ago you helped", Welcome, Thank-you, or no type) is sent as a Special update.
+ */
+function broadcastKindOf_(tpl) { return tpl && BROADCAST_KINDS[tpl.message_type] ? tpl.message_type : 'special_update'; }
+
 function cleanBroadcast_(b) {
-  if (!BROADCAST_KINDS[b.kind]) throw new ApiError('Choose what kind of message this is.');
+  var tplId = strOrNull_(b.template_id), tpl = tplId ? findOne_('DonorTemplates', 'id', tplId) : null;
+  var kind = tpl ? broadcastKindOf_(tpl) : (BROADCAST_KINDS[b.kind] ? b.kind : 'special_update');   // no template chosen yet: keep what was there
   var name = strOrNull_(b.name); if (!name) throw new ApiError('Give it a name.');
   var segs = (b.segments || []).filter(function (s) { return SEGMENT_CODES.indexOf(s) >= 0; });
   var sendOn = strOrNull_(b.send_on) ? parseDateInput_(b.send_on) : null;
@@ -740,7 +747,7 @@ function cleanBroadcast_(b) {
   if (strOrNull_(b.event_date) && !eventDate) throw new ApiError('The festival date is not valid.');
   var values = {}; Object.keys(b.values || {}).forEach(function (k) { var v = String(b.values[k] || '').trim(); if (v) values[labelKey_(k)] = v; });
   if (values[MEDIA_LABEL]) values[MEDIA_LABEL] = fileIdFrom_(values[MEDIA_LABEL]) || values[MEDIA_LABEL];   // a Drive share link -> its file id
-  return { name: name, kind: b.kind, template_id: strOrNull_(b.template_id), campaign_id: strOrNull_(b.campaign_id), segments: segs,
+  return { name: name, kind: kind, template_id: tplId, campaign_id: strOrNull_(b.campaign_id), segments: segs,
     values: values, send_on: sendOn, event_date: eventDate,
     excluded_tags: cleanTags_(b.excluded_tags, true) };
 }
@@ -756,6 +763,7 @@ function saveBroadcast_(user, id, body) {
     if (!b) b = { id: newId_(), trigger: BROADCAST_KINDS[c.kind], status: 'draft',
       created_by: user.email, approved_by: null, approved_at: null, message_count: 0, created_at: nowIso_() };
     Object.keys(c).forEach(function (k) { b[k] = c[k]; });
+    b.trigger = BROADCAST_KINDS[b.kind];   // the kind follows the template, so the rule code does too
     if (id) saveRows_('DonorBroadcasts', [b]); else insertRows_('DonorBroadcasts', [b]);
     return cleanDonorRow_(b);
   });
@@ -891,7 +899,7 @@ function approveBroadcast_(user, id, opts) {
     if (!tpl) throw new ApiError('Choose a template first.');
     if (tpl.status !== 'approved') throw new ApiError('That template is not approved by WhatsApp yet.');
     if (tpl.archived_at) throw new ApiError('That template is archived. Restore it on the Templates page, or choose another.');
-    if (tpl.message_type !== b.kind) throw new ApiError('That template is a "' + (MESSAGE_TYPES[tpl.message_type] || 'untyped') + '" template, not a "' + MESSAGE_TYPES[b.kind] + '".');
+    // any approved template may be used, whatever its message type; the broadcast's kind still sets its rule code, email subject and (festive) expiry
     if (MEDIA_TYPES[tpl.media_type] && !(b.values || {})[MEDIA_LABEL]) throw new ApiError('This template sends a file. Add the attachment (a Google Drive share link) first.');
     var ctx = broadcastContext_(), donors = loadTable_('Donors'), aud = broadcastAudience_(b, donors, ctx.donations);
     if (!aud.length) throw new ApiError(broadcastAudience_(b, donors, ctx.donations, true).length ? 'Nobody in the audience has a WhatsApp or email opt-in.' : 'Nobody is in the audience.');
@@ -903,7 +911,8 @@ function approveBroadcast_(user, id, opts) {
     var rows = [], nWa = 0, nEmail = 0;
     aud.forEach(function (d) {
       var key = 'B:' + b.id + ':' + d.id;
-      var f = { donor_id: d.id, template_id: tpl.id, message_type: b.kind, trigger: b.trigger, broadcast_id: b.id, campaign_id: b.campaign_id,
+      // the message carries the template's own type, so the email subject and "Last communicated" match the message (e.g. "A year ago, you helped")
+      var f = { donor_id: d.id, template_id: tpl.id, message_type: tpl.message_type || b.kind, trigger: b.trigger, broadcast_id: b.id, campaign_id: b.campaign_id,
         variables: b.values, not_before: notBefore, expires_at: expires || undefined };
       // one message per chosen channel; the email's key is the WhatsApp key + ':email'
       if (byWa && waReady_(d) && !existing[key]) { rows.push(newDonorMessage_(Object.assign({}, f, { dedupe_key: key }))); nWa++; }
@@ -1087,7 +1096,7 @@ function retryDonorMessage_(user, id) {
 var BUILD_DonorEngine = '20261107-1230'; // build stamp (see Build.gs)
 /**
  * Donor Communication engine.
- *   runDonorTriggers_()      runs the one automatic rule (T7) and makes the email copies of waiting messages.
+ *   runDonorTriggers_()      makes the email copies of waiting messages (there is no automatic rule any more; T7 was turned off).
  *                            It is safe to run any number of times: every message has a dedupe key.
  *   dispatchDonorBatch_()    decides what may be sent right now (opt-in, template, values) and sends it.
  * Both run from the 10-minute cron tick; the donor screens also call them right after an approval or a donation.
@@ -1130,7 +1139,7 @@ function addMsg_(ctx, f) {
 
 function count_(ctx, k) { ctx.stats[k] = (ctx.stats[k] || 0) + 1; }
 
-/** T7: 11 months after the last donation, last year's donors (P4) get an "a year ago you helped" update unless they gave again. */
+/** T7 (turned off, no longer called): 11 months after the last donation, last year's donors (P4) got an "a year ago you helped" update unless they gave again. */
 function triggerT7_(ctx) {
   ctx.donors.forEach(function (d) {
     if (d.segment !== 'P4' || (d.opted_out && !emailReady_(d)) || !d.last_donation_date) return;
@@ -1144,7 +1153,7 @@ function triggerT7_(ctx) {
  * Messages from rules that no longer exist: T1 welcome, T2 thank-you, T4 campaign update, T9/T10 programme reports.
  * One that never went out is deleted (it would only clutter the Queue); one that was sent stays as history.
  */
-var RETIRED_TRIGGERS = ['T1', 'T2', 'T4'], RETIRED_TYPES = ['campaign_update', 'report_reminder', 'programme_report'];
+var RETIRED_TRIGGERS = ['T1', 'T2', 'T4', 'T7'], RETIRED_TYPES = ['campaign_update', 'report_reminder', 'programme_report'];
 function retiredUnsent_(m) {
   return m.channel !== 'manual' && !m.wa_sent_at && (RETIRED_TRIGGERS.indexOf(m.trigger) >= 0 || RETIRED_TYPES.indexOf(m.message_type) >= 0);
 }
@@ -1168,7 +1177,7 @@ function runDonorTriggers_() {
     var purged = purgeRetiredDonorMessages_();   // first, so the row numbers loaded below are current
     var ctx = loadEngineCtx_();
     if (purged) ctx.stats.retired_removed = purged;
-    triggerT7_(ctx);   // the only automatic rule; everything else is a broadcast the team writes and approves
+    // T7 ("a year ago you helped") was turned off: it is now sent by hand as a broadcast. No rule creates messages on its own any more.
     triggerEmailTwins_(ctx);
     saveRows_('Donors', values_(ctx.dirtyDonors));
     saveRows_('DonorMessages', values_(ctx.dirtyMsgs));
@@ -1487,10 +1496,10 @@ var POTENTIAL_SEGMENTS = ['P1', 'P2', 'P3', 'P4', 'P5'];
 var TEST_SEGMENT = 'P0';
 var SEGMENT_CODES = Object.keys(SEGMENTS);
 
-/** The six message types from the metadata sheet, plus the one T7 needs. */
+/** The six message types from the metadata sheet, plus "a year ago you helped" (sent as a broadcast). */
 var MESSAGE_TYPES = { welcome: 'Welcome', general_update: 'General update', special_update: 'Special update',
   thank_you: 'Thank-you', festive_greeting: 'Festive greeting',
-  year_ago_update: '"A year ago you helped" update (T7)' };
+  year_ago_update: '"A year ago you helped" update' };
 
 var HOLD_DAYS = 14;            // an update held longer than this is dropped (a stale update is worse than none)
 var THANKS_HOLD_DAYS = 30;

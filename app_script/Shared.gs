@@ -94,9 +94,7 @@ var API = {
   'overview.summary': function (u) { return overviewSummary_(); },
   'info': function (u) {
     var c = cfg_();
-    return { call_fallback_hours: c.CALL_FALLBACK_HOURS, call_window_start: c.CALL_WINDOW_START, call_window_end: c.CALL_WINDOW_END,
-      timezone: c.APP_TIMEZONE, cost_per_whatsapp: c.COST_PER_WHATSAPP, cost_per_call: c.COST_PER_CALL,
-      currency: c.COST_CURRENCY, voice_enabled: !!c.TWILIO_VOICE_FROM, user: u.email };
+    return { timezone: c.APP_TIMEZONE, cost_per_whatsapp: c.COST_PER_WHATSAPP, currency: c.COST_CURRENCY, user: u.email };
   },
   'parents.list': function (u, f) { return listParents_(u, f); },
   'parents.groups': function (u) { return listGroups_(); },
@@ -237,7 +235,6 @@ function buildReport_() {
     ['DonorCore', typeof BUILD_DonorCore === 'undefined' ? null : BUILD_DonorCore],
     ['DonorEngine', typeof BUILD_DonorEngine === 'undefined' ? null : BUILD_DonorEngine],
     ['DonorRules', typeof BUILD_DonorRules === 'undefined' ? null : BUILD_DonorRules],
-    ['Fallback', typeof BUILD_Fallback === 'undefined' ? null : BUILD_Fallback],
     ['Parents', typeof BUILD_Parents === 'undefined' ? null : BUILD_Parents],
     ['Permissions', typeof BUILD_Permissions === 'undefined' ? null : BUILD_Permissions],
     ['Replies', typeof BUILD_Replies === 'undefined' ? null : BUILD_Replies],
@@ -246,7 +243,6 @@ function buildReport_() {
     ['Status', typeof BUILD_Status === 'undefined' ? null : BUILD_Status],
     ['Templates', typeof BUILD_Templates === 'undefined' ? null : BUILD_Templates],
     ['Twilio', typeof BUILD_Twilio === 'undefined' ? null : BUILD_Twilio],
-    ['VoiceScripts', typeof BUILD_VoiceScripts === 'undefined' ? null : BUILD_VoiceScripts],
     ['Webhooks', typeof BUILD_Webhooks === 'undefined' ? null : BUILD_Webhooks]
   ];
   var present = files.filter(function (f) { return f[1]; }).map(function (f) { return f[1]; }).sort();
@@ -261,8 +257,8 @@ function buildReport_() {
 
 /** Which of the four server files holds each part. */
 var BUILD_FILE_OF = { Api: 'Shared.gs', Branding: 'Shared.gs', Build: 'Shared.gs', Config: 'Shared.gs', Cron: 'Shared.gs', Db: 'Shared.gs', Replies: 'Shared.gs',
-  Status: 'Shared.gs', Templates: 'Shared.gs', Twilio: 'Shared.gs', Webhooks: 'Shared.gs', Archive: 'Parent.gs', Campaigns: 'Parent.gs', Fallback: 'Parent.gs',
-  Parents: 'Parent.gs', Sender: 'Parent.gs', VoiceScripts: 'Parent.gs', DonorApi: 'Donor.gs', DonorCore: 'Donor.gs', DonorEngine: 'Donor.gs', DonorRules: 'Donor.gs',
+  Status: 'Shared.gs', Templates: 'Shared.gs', Twilio: 'Shared.gs', Webhooks: 'Shared.gs', Archive: 'Parent.gs', Campaigns: 'Parent.gs',
+  Parents: 'Parent.gs', Sender: 'Parent.gs', DonorApi: 'Donor.gs', DonorCore: 'Donor.gs', DonorEngine: 'Donor.gs', DonorRules: 'Donor.gs',
   Admin: 'Admin.gs', Permissions: 'Admin.gs', Setup: 'Admin.gs' };
 
 function buildProblems_() { var r = buildReport_(); return r.problems.join('; '); }
@@ -275,13 +271,9 @@ var BUILD_Config = '20261107-1230'; // build stamp (see Build.gs)
  */
 var DEFAULTS = {
   TWILIO_MESSAGING_SERVICE_SID: '',
-  CALL_FALLBACK_HOURS: '6',
-  CALL_WINDOW_START: '09:00',
-  CALL_WINDOW_END: '19:00',
   APP_TIMEZONE: 'Asia/Kolkata',
   SEND_CONCURRENCY: '10',
   COST_PER_WHATSAPP: '0',
-  COST_PER_CALL: '0',
   COST_CURRENCY: 'INR'
 };
 
@@ -291,26 +283,17 @@ function cfg_() {
   if (cfgCache_) return cfgCache_;
   var p = PropertiesService.getScriptProperties().getProperties();
   function get(k) { return p[k] !== undefined && p[k] !== '' ? p[k] : (DEFAULTS[k] !== undefined ? DEFAULTS[k] : ''); }
-  function hhmm(v) {
-    var m = /^(\d{1,2}):(\d{2})$/.exec(String(v).trim());
-    return m ? ('0' + m[1]).slice(-2) + ':' + m[2] : '09:00';
-  }
   cfgCache_ = {
     TWILIO_ACCOUNT_SID: get('TWILIO_ACCOUNT_SID'),
     TWILIO_AUTH_TOKEN: get('TWILIO_AUTH_TOKEN'),
     TWILIO_WHATSAPP_FROM: get('TWILIO_WHATSAPP_FROM'),
-    TWILIO_VOICE_FROM: get('TWILIO_VOICE_FROM'),
     TWILIO_MESSAGING_SERVICE_SID: get('TWILIO_MESSAGING_SERVICE_SID'),
     // URL of the *webhook* deployment (Execute as: Me, Access: Anyone), no trailing slash.
     PUBLIC_BASE_URL: String(get('PUBLIC_BASE_URL')).replace(/\/+$/, ''),
     WEBHOOK_SECRET: get('WEBHOOK_SECRET'),
-    CALL_FALLBACK_HOURS: Number(get('CALL_FALLBACK_HOURS')) || 6,
-    CALL_WINDOW_START: hhmm(get('CALL_WINDOW_START')),
-    CALL_WINDOW_END: hhmm(get('CALL_WINDOW_END')),
     APP_TIMEZONE: get('APP_TIMEZONE'),
     SEND_CONCURRENCY: Math.max(1, Number(get('SEND_CONCURRENCY')) || 10),
     COST_PER_WHATSAPP: Number(get('COST_PER_WHATSAPP')) || 0,
-    COST_PER_CALL: Number(get('COST_PER_CALL')) || 0,
     COST_CURRENCY: get('COST_CURRENCY')
   };
   return cfgCache_;
@@ -337,7 +320,7 @@ function nowIso_() { return new Date().toISOString(); }
 var BUILD_Cron = '20261107-1230'; // build stamp (see Build.gs)
 /** Scheduler. Install with installTriggers() (menu: Parent Comm -> Install triggers). */
 var TICK_BUDGET_MS = 4.5 * 60 * 1000;
-var REPLAY_SOURCES = ['whatsapp_status', 'whatsapp_inbound', 'voice_gather', 'voice_status'];
+var REPLAY_SOURCES = ['whatsapp_status', 'whatsapp_inbound'];
 
 /** Replay events that arrived while the lock was busy (last 24 h). */
 function replayEvents_() {
@@ -360,15 +343,13 @@ function tick_() {
   cache.put('tick_running', '1', 330);
   var deadline = Date.now() + TICK_BUDGET_MS;
   var result = {};
-  // Replays first, then resends and re-checks so new failures get their fallback call in the same tick,
-  // and recovered replies come before the fallback so a parent who answered is not called.
+  // Replays first, then resends and re-checks, then missed replies.
   var jobs = [
     ['replay_events', function () { return replayEvents_(); }],
     ['resume_campaigns', function () { return resumeStuckCampaigns_(deadline - 90000); }],
     ['whatsapp_recheck', function () { return recheckStuckMessages_(deadline - 60000); }],
     ['poll_status', function () { return instantUpdates_() ? { skipped: 'Twilio calls the app back (webhooks on)' } : pollMessageStatuses_(); }],
     ['recover_replies', function () { return recoverMissedReplies_(); }],
-    ['fallback', function () { return runFallback_(deadline); }],
     ['donor_triggers', function () { return runDonorTriggers_(); }],
     ['donor_dispatch', function () { return dispatchDonorBatch_(Math.max(10000, deadline - Date.now() - 60000)); }],
     ['access_expiry', function () { return expireAccess_(); }],
@@ -1165,7 +1146,7 @@ function importTwilioTemplates_(user, opts) {
 
 // ===== Twilio.gs =====
 var BUILD_Twilio = '20261107-1230'; // build stamp (see Build.gs)
-/** All Twilio calls (Messaging, Voice, Content API). Swap this file to change provider. */
+/** All Twilio calls (Messaging, Content API). Swap this file to change provider. */
 var TW_API = 'https://api.twilio.com/2010-04-01/Accounts/';
 var TW_CONTENT = 'https://content.twilio.com/v1';
 
@@ -1286,20 +1267,6 @@ function listInboundWhatsapp_(since) {
   }).map(function (m) { return { MessageSid: m.sid, From: m.from || '', Body: m.body || '' }; });
 }
 
-// ---------- Voice ----------
-
-function placeCall_(phone, messageId) {
-  var c = cfg_();
-  var r = twFormRequest_('post', TW_API + c.TWILIO_ACCOUNT_SID + '/Calls.json', {
-    To: phone,
-    From: c.TWILIO_VOICE_FROM,
-    Url: webhookUrl_('voice_twiml', { message_id: messageId }),
-    StatusCallback: webhookUrl_('voice_status', { message_id: messageId }),
-    StatusCallbackEvent: 'completed',
-    Timeout: '25'
-  });
-  return r.sid;
-}
 
 // ---------- Content API (templates) ----------
 
@@ -1361,7 +1328,6 @@ var BUILD_Webhooks = '20261107-1230'; // build stamp (see Build.gs)
  * Each webhook: check secret, log the payload, apply it. If the lock is busy the event stays unprocessed
  * and the cron tick replays it, so nothing is lost.
  */
-var CALL_ENDED = ['completed', 'busy', 'no-answer', 'failed', 'canceled'];
 var RESERVED_PARAMS = ['hook', 'k', 'message_id', 'attempt'];
 
 function safeEqual_(a, b) {
@@ -1379,14 +1345,6 @@ function twiml_(inner) {
     .setMimeType(ContentService.MimeType.XML);
 }
 
-function xmlEsc_(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-}
-
-function say_(script, text) {
-  return '<Say voice="' + xmlEsc_(script.voice) + '" language="' + xmlEsc_(script.language) + '">' + xmlEsc_(text) + '</Say>';
-}
-
 /** Apply one logged event (inside the lock). Used by webhooks and by the cron replay. */
 function applyEvent_(source, params, messageId, eventId) {
   if (source === 'whatsapp_status') {
@@ -1399,19 +1357,6 @@ function applyEvent_(source, params, messageId, eventId) {
     else if (!applyStatus_(messageId, ns, extra) && donorReady_()) applyDonorStatus_(messageId, ns, extra);   // older donor messages have plain ids
   } else if (source === 'whatsapp_inbound') {
     handleInbound_(params, eventId);
-  } else if (source === 'voice_gather') {
-    if (!messageId) return;
-    var digit = params.Digits || '';
-    updateMessage_(messageId, { call_digit: digit });
-    if (digit === '1') applyStatus_(messageId, 'confirmed', { confirmed_via: 'voice' });
-    else if (digit === '2') applyStatus_(messageId, 'declined', { confirmed_via: 'voice' });
-  } else if (source === 'voice_status') {
-    if (!messageId) return;
-    var f = { call_status: params.CallStatus || '' };
-    if (params.CallSid) f.call_sid = params.CallSid;
-    updateMessage_(messageId, f);
-    // Ended without a 1 or 2: flag for personal follow-up (never overwrites confirmed/declined).
-    if (CALL_ENDED.indexOf(params.CallStatus) >= 0) applyStatus_(messageId, 'flagged', {});
   }
 }
 
@@ -1428,22 +1373,6 @@ function processEvent_(eventId, source, params, messageId) {
     console.warn('Event ' + eventId + ' left for the cron replay: ' + e.message);
     return false;
   }
-}
-
-function loadCallContext_(messageId) {
-  var m = messageId ? findOne_('Messages', 'id', messageId) : null;
-  if (!m) return { script: getVoiceScript_('en'), details: '' };
-  var camp = findOne_('Campaigns', 'id', m.campaign_id);
-  var vars = (camp && camp.variables) || {};
-  var details = Object.keys(vars).sort(function (a, b) { return Number(a) - Number(b); }).map(function (k) { return vars[k]; }).join(', ');
-  return { script: getVoiceScript_('en'), details: details };   // parents no longer have a language
-}
-
-function gatherTwiml_(messageId, script, details, attempt, prefix) {
-  var action = webhookUrl_('voice_gather', { message_id: messageId, attempt: attempt });
-  var prompt = (prefix ? prefix + ' ' : '') + script.prompt.replace('{details}', details);
-  return twiml_('<Gather input="dtmf" numDigits="1" timeout="8" action="' + xmlEsc_(action) + '" method="POST">' +
-    say_(script, prompt) + '</Gather>' + say_(script, script.goodbye));
 }
 
 function handleHook_(e) {
@@ -1471,26 +1400,6 @@ function handleHook_(e) {
     var id2 = logEvent_(null, 'whatsapp_inbound', params, divisionOfPhone_(phoneOf_(params)));
     processEvent_(id2, 'whatsapp_inbound', params, null);
     return twiml_(''); // empty TwiML: never auto-reply with free text
-  }
-  if (hook === 'voice_twiml') {
-    var ctx = loadCallContext_(messageId);
-    return gatherTwiml_(messageId, ctx.script, ctx.details, 1, '');
-  }
-  if (hook === 'voice_gather') {
-    var attempt = Number(p.attempt) || 1, digit = params.Digits || '';
-    var id3 = logEvent_(messageId, 'voice_gather', params);
-    processEvent_(id3, 'voice_gather', params, messageId);
-    var cx = loadCallContext_(messageId);
-    if (digit === '1') return twiml_(say_(cx.script, cx.script.confirmed));
-    if (digit === '2') return twiml_(say_(cx.script, cx.script.declined));
-    // Wrong key: replay once, then leave it to the status callback (-> flagged).
-    if (attempt < 2) return gatherTwiml_(messageId, cx.script, cx.details, 2, cx.script.invalid);
-    return twiml_(say_(cx.script, cx.script.goodbye));
-  }
-  if (hook === 'voice_status') {
-    var id4 = logEvent_(messageId, 'voice_status', params);
-    processEvent_(id4, 'voice_status', params, messageId);
-    return textOut_('');
   }
   return textOut_('Unknown hook');
 }

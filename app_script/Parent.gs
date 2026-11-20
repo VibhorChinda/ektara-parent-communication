@@ -1,6 +1,6 @@
 // ========================================================================================================
 // EK TARA COMMUNICATIONS: SERVER CODE, PARENT (Parent.gs)
-// Parent Communication: campaigns, Parent Info (CSV upload), sending, fallback calls, Drive archive, call scripts.
+// Parent Communication: campaigns, Parent Info (CSV upload), sending, Drive archive.
 // The project needs all four server files: Shared.gs, Parent.gs, Donor.gs, Admin.gs (any order).
 // If you see "Identifier 'ApiError' has already been declared", an old Code.gs is still in the project: delete it.
 // ========================================================================================================
@@ -15,7 +15,7 @@ var BUILD_Archive = '20261107-1230'; // build stamp (see Build.gs)
  * Files go to the Drive folder ARCHIVE_FOLDER_ID (created automatically on first use).
  * The cron tick archives finished campaigns by itself; the campaign page also has an "Export to Drive" button.
  */
-var ARCHIVE_AFTER_MS = 49 * 3600 * 1000; // the IVR fallback stops acting after 48 h, so nothing more will change
+var ARCHIVE_AFTER_MS = 49 * 3600 * 1000; // after about two days statuses and replies have settled
 
 function archiveFolder_() {
   var props = PropertiesService.getScriptProperties(), id = props.getProperty('ARCHIVE_FOLDER_ID');
@@ -46,8 +46,6 @@ function eventSummary_(e) {
   switch (e.source) {
     case 'whatsapp_status': return 'WhatsApp: ' + (p.MessageStatus || '?') + (p.ErrorCode ? ' (error ' + p.ErrorCode + ')' : '');
     case 'whatsapp_inbound': return (p.ButtonPayload ? 'Tapped' : 'Replied') + ' "' + (p.Body || '') + '"' + (p.recovered ? ' (recovered)' : '');
-    case 'voice_gather': return 'Pressed ' + (p.Digits || 'nothing');
-    case 'voice_status': return 'Call ' + (p.CallStatus || '?') + (p.CallDuration ? ', ' + p.CallDuration + ' s' : '');
     case 'admin': return 'Marked ' + p.outcome + ' by ' + p.by;
     case 'cron': return p.error ? 'Error: ' + p.error : p.recheck_status ? 'Status re-checked with Twilio: ' + p.recheck_status : 'Background job';
     default: return e.source;
@@ -69,7 +67,7 @@ function buildArchive_(c, t) {
       p.parent_name, p.child_name || '', parents[m.parent_id] ? m.parent_id : '', p.phone_e164, p.institution, p.class_or_year, p.section || '',
       p.beneficiary_type || '', p.beneficiary_status || '',
       STATUS_LABELS_[m.status] || m.status, m.confirmed_via || '', localTime_(m.wa_sent_at), m.wa_error || '',
-      localTime_(m.call_requested_at), m.call_status || '', m.call_digit || '', m.reply_text || '', localTime_(m.replied_at),
+      m.reply_text || '', localTime_(m.replied_at),
       m.resolved_by || '', localTime_(m.updated_at)] };
   }).sort(function (a, b) {
     for (var i = 0; i < 4; i++) { var r = String(a.sort[i]).localeCompare(String(b.sort[i]), undefined, { numeric: true, sensitivity: 'base' }); if (r) return r; }
@@ -86,11 +84,10 @@ function buildArchive_(c, t) {
   var counts = countByStatus_(msgs), vars = c.variables || {};
   var text = t.body || '';
   Object.keys(vars).forEach(function (k) { text = text.split('{{' + k + '}}').join(vars[k]); });
-  var via = { whatsapp: 0, voice: 0, admin: 0 }, typed = 0, calls = 0;
+  var via = { whatsapp: 0, admin: 0 }, typed = 0;
   msgs.forEach(function (m) {
     if ((m.status === 'confirmed' || m.status === 'declined') && via[m.confirmed_via] !== undefined) via[m.confirmed_via]++;
     if (m.reply_text) typed++;
-    if (m.call_requested_at) calls++;
   });
   var answered = counts.confirmed + counts.declined;
   var summary = [
@@ -104,13 +101,13 @@ function buildArchive_(c, t) {
   ];
   STATUSES.forEach(function (s) { if (counts[s]) summary.push([STATUS_LABELS_[s], counts[s]]); });
   summary.push(['Answered (confirmed + declined)', answered + (counts.total ? ' (' + Math.round(answered / counts.total * 100) + '%)' : '')],
-    ['  answered on WhatsApp', via.whatsapp], ['  answered on the phone call', via.voice], ['  recorded by an admin', via.admin],
-    ['Typed WhatsApp replies', typed], ['Fallback calls placed', calls]);
+    ['  answered on WhatsApp', via.whatsapp], ['  recorded by an admin', via.admin],
+    ['Typed WhatsApp replies', typed]);
   return {
     Summary: { header: ['Item', 'Value'], rows: summary },
     Recipients: { header: ['Parent', 'Child', 'New Child ID', 'Phone', 'School', 'Grade', 'Section / stream',
-      'Type of beneficiary', 'Status of beneficiary', 'Status', 'Answered via', 'WhatsApp sent at', 'WhatsApp error', 'Call requested at', 'Call status',
-      'Key pressed', 'Typed reply', 'Replied at', 'Recorded by', 'Last update'], rows: recipients },
+      'Type of beneficiary', 'Status of beneficiary', 'Status', 'Answered via', 'WhatsApp sent at', 'WhatsApp error',
+      'Typed reply', 'Replied at', 'Recorded by', 'Last update'], rows: recipients },
     Timeline: { header: ['Time', 'Parent', 'Phone', 'Source', 'What happened', 'Raw payload'], rows: timeline }
   };
 }
@@ -353,12 +350,10 @@ function getCampaign_(user, id, status) {
   var all = loadTable_('Messages').filter(function (m) { return m.campaign_id === id; });
   var counts = countByStatus_(all);
   var msgs = status ? all.filter(function (m) { return m.status === status; }) : all;
-  var now = Date.now();
   msgs = msgs.map(function (m) {
     var p = parentForDisplay_(m, parents);
     m.parents = { parent_name: p.parent_name, child_name: p.child_name, phone_e164: p.phone_e164,
       beneficiary_type: p.beneficiary_type, beneficiary_status: p.beneficiary_status, deleted: !parents[m.parent_id] };
-    m.call_due_at = parents[m.parent_id] ? nextCallTime_(m, p, c.status, now) : null; // no calls to a deleted parent
     delete m._row;
     return m;
   });
@@ -369,7 +364,7 @@ function getCampaign_(user, id, status) {
   return c;
 }
 
-/** Stop: unsent messages are cancelled and no more fallback calls are placed. */
+/** Stop: unsent messages are cancelled. */
 function cancelCampaign_(user, id) {
   return withLock_(function () {
     var c = findOne_('Campaigns', 'id', id);
@@ -404,7 +399,7 @@ function retryFailed_(user, id) {
     if (!c) throw new ApiError('Campaign not found', null, 404);
     if (c.status === 'cancelled') throw new ApiError('This campaign was stopped.');
     var failed = loadTable_('Messages').filter(function (m) {
-      return m.campaign_id === id && m.status === 'failed' && !m.call_requested_at;
+      return m.campaign_id === id && m.status === 'failed';
     });
     failed.forEach(function (m) {
       m.status = 'queued'; m.wa_sid = null; m.wa_sent_at = null; m.wa_error = null; m.send_claimed_at = null; m.updated_at = m.status_at = nowIso_();
@@ -421,113 +416,6 @@ function resolveMessage_(user, messageId, outcome) {
   if (!ok) throw new ApiError("This message can't be changed (it was cancelled or doesn't exist).");
   logEvent_(messageId, 'admin', { outcome: outcome, by: user.email });
   return { ok: true };
-}
-
-// ===== Fallback.gs =====
-var BUILD_Fallback = '20261107-1230'; // build stamp (see Build.gs)
-/** The IVR fallback: call parents who have not confirmed. Run by the cron tick. */
-var MAX_AGE_MS = 48 * 3600 * 1000;
-var CALL_BATCH = 20;
-
-/** Voice fallback is optional: it only runs when TWILIO_VOICE_FROM is set. */
-function voiceEnabled_() { return !!cfg_().TWILIO_VOICE_FROM; }
-
-function hmNow_(d) { return Utilities.formatDate(d || new Date(), cfg_().APP_TIMEZONE, 'HH:mm'); }
-
-function inCallWindow_() {
-  var c = cfg_(), hm = hmNow_();
-  return c.CALL_WINDOW_START <= hm && hm < c.CALL_WINDOW_END;
-}
-
-/** First moment at or after `d` that is inside the call window (in APP_TIMEZONE). */
-function intoCallWindow_(d) {
-  var c = cfg_(), tz = c.APP_TIMEZONE;
-  var day = Utilities.formatDate(d, tz, 'yyyy-MM-dd'), hm = Utilities.formatDate(d, tz, 'HH:mm');
-  if (hm < c.CALL_WINDOW_START) return Utilities.parseDate(day + ' ' + c.CALL_WINDOW_START, tz, 'yyyy-MM-dd HH:mm');
-  if (hm >= c.CALL_WINDOW_END) {
-    var next = Utilities.formatDate(new Date(d.getTime() + 24 * 3600 * 1000), tz, 'yyyy-MM-dd');
-    return Utilities.parseDate(next + ' ' + c.CALL_WINDOW_START, tz, 'yyyy-MM-dd HH:mm');
-  }
-  return d;
-}
-
-/** Roughly when the fallback will call this parent (for the UI). null if no call is planned. */
-function nextCallTime_(m, parent, campaignStatus, nowMs) {
-  if (!voiceEnabled_()) return null; // WhatsApp-only mode: no calls are planned
-  if (campaignStatus === 'cancelled' || isDiscontinued_(parent) || m.call_requested_at) return null;
-  var due;
-  if (['sent', 'delivered', 'read'].indexOf(m.status) >= 0 && m.wa_sent_at) {
-    var sent = Date.parse(m.wa_sent_at);
-    if (nowMs - sent > MAX_AGE_MS) return null;
-    due = sent + cfg_().CALL_FALLBACK_HOURS * 3600 * 1000;
-  } else if (m.status === 'failed') {
-    due = nowMs;
-  } else return null;
-  return intoCallWindow_(new Date(Math.max(due, nowMs))).toISOString();
-}
-
-function findCandidates_() {
-  var now = Date.now(), cutoff = now - cfg_().CALL_FALLBACK_HOURS * 3600 * 1000, oldest = now - MAX_AGE_MS;
-  var parents = {}; loadTable_('Parents').forEach(function (p) { parents[p.id] = p; });
-  var camps = {}; loadTable_('Campaigns').forEach(function (c) { camps[c.id] = c; });
-  return loadTable_('Messages').filter(function (m) {
-    if (m.call_requested_at) return false;
-    var p = parents[m.parent_id], c = camps[m.campaign_id];
-    if (!p || !c || isDiscontinued_(p) || c.status === 'cancelled') return false;
-    if (['sent', 'delivered', 'read'].indexOf(m.status) >= 0) {
-      var t = m.wa_sent_at ? Date.parse(m.wa_sent_at) : NaN;
-      return t < cutoff && t > oldest; // WhatsApp delivered but no answer after CALL_FALLBACK_HOURS
-    }
-    if (m.status === 'failed') return Date.parse(m.updated_at) > oldest; // WhatsApp failed: call now
-    return false;
-  }).map(function (m) { return { id: m.id, phone: parents[m.parent_id].phone_e164 }; });
-}
-
-/** Under lock: claim up to `max` candidates that nobody else claimed first. */
-function claimCalls_(candidates, max) {
-  return withLock_(function () {
-    var ids = {}; candidates.forEach(function (c) { ids[c.id] = c; });
-    var picked = [], dirty = [];
-    loadTable_('Messages').forEach(function (m) {
-      if (!ids[m.id] || m.call_requested_at || picked.length >= max) return;
-      m.call_requested_at = nowIso_(); dirty.push(m); picked.push(ids[m.id]);
-    });
-    saveRows_('Messages', dirty);
-    return picked;
-  });
-}
-
-function runFallback_(deadline) {
-  if (!voiceEnabled_()) return { skipped: 'voice not configured (WhatsApp only)' };
-  if (!inCallWindow_()) return { skipped: 'outside call window' };
-  if (!instantUpdates_()) return { skipped: 'phone calls need the Twilio address (PUBLIC_BASE_URL)' };
-  requireConfig_(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'PUBLIC_BASE_URL', 'WEBHOOK_SECRET']);
-  var candidates = findCandidates_(), called = 0, failed = 0;
-  while (candidates.length && Date.now() < deadline) {
-    var batch = claimCalls_(candidates, CALL_BATCH);
-    if (!batch.length) break;
-    var taken = {}; batch.forEach(function (b) { taken[b.id] = true; });
-    candidates = candidates.filter(function (c) { return !taken[c.id]; });
-    var results = batch.map(function (b) {
-      try { return { id: b.id, sid: placeCall_(b.phone, b.id) }; }
-      catch (e) { console.warn('Call for message ' + b.id + ' failed: ' + e.message); return { id: b.id, error: e.message }; }
-    });
-    withLock_(function () {
-      results.forEach(function (r) {
-        if (r.sid) {
-          // call_status is left to the status webhook, which may already have run.
-          var m = findOne_('Messages', 'id', r.id);
-          if (m) { m.call_sid = r.sid; m.updated_at = nowIso_(); saveRows_('Messages', [m]); }
-          called++;
-        } else {
-          applyStatus_(r.id, 'flagged', { call_status: 'failed: ' + r.error });
-          failed++;
-        }
-      });
-    });
-    results.forEach(function (r) { if (r.error) logEvent_(r.id, 'cron', { action: 'place_call', error: r.error }); });
-  }
-  return { called: called, call_failed: failed };
 }
 
 // ===== Parents.gs =====
@@ -622,7 +510,8 @@ function uploadParents_(user, csvText) {
     if (cells.join('').trim() === '') continue; // blank line
     var rec = {};
     PARENT_COLUMNS.forEach(function (c) { rec[c[1]] = cells[col[c[1]]] === undefined ? '' : String(cells[col[c[1]]]); });
-    var bad = { row: rowNumber, parent_name: cleanText_(rec.parent_name) || null, phone: cleanText_(rec.phone) || null };
+    var bad = { row: rowNumber, parent_name: cleanText_(rec.parent_name) || null, phone: cleanText_(rec.phone) || null,
+      cells: PARENT_COLUMNS.map(function (c) { return rec[c[1]]; }) };   // the row as it was in the file, for "Download rejected rows" (nothing is stored)
     var res = cleanParent_(rec);
     if (res.error) { bad.reason = res.error; rejected.push(bad); continue; }
     var p = res.row;
@@ -633,23 +522,29 @@ function uploadParents_(user, csvText) {
   return withLock_(function () {
     var existing = {};
     loadTable_('Parents').forEach(function (r) { existing[r.id] = r; });
-    var toUpdate = [], toInsert = [], rows = [], now = nowIso_();
+    var toUpdate = [], toInsert = [], rows = [], unchanged = 0, now = nowIso_();
+    var same = function (a, b) { return String(a === null || a === undefined ? '' : a) === String(b === null || b === undefined ? '' : b); };
     Object.keys(byId).forEach(function (id) {
-      var p = byId[id], old = existing[id];
+      var p = byId[id], old = existing[id], status;
       if (old) {
-        Object.keys(p).forEach(function (k) { old[k] = p[k]; });
-        old.updated_at = now;
-        toUpdate.push(old);
+        // a known New Child ID: save only when something in the row is different; an identical row is left as it is (and keeps its updated_at)
+        var changed = Object.keys(p).some(function (k) { return !same(old[k], p[k]); });
+        if (changed) {
+          Object.keys(p).forEach(function (k) { old[k] = p[k]; });
+          old.updated_at = now;
+          toUpdate.push(old); status = 'updated';
+        } else { unchanged++; status = 'unchanged'; }
       } else {
         p.created_at = now; p.updated_at = now;
-        toInsert.push(p);
+        toInsert.push(p); status = 'added';
       }
-      rows.push({ row: firstRow[id], parent_name: p.parent_name, phone: p.phone_e164, status: old ? 'updated' : 'added' });
+      rows.push({ row: firstRow[id], parent_name: p.parent_name, phone: p.phone_e164, status: status });
     });
     saveRows_('Parents', toUpdate);
     insertRows_('Parents', toInsert);
     rows.sort(function (a, b) { return a.row - b.row; });
-    return { inserted: toInsert.length, updated: toUpdate.length, rejected: rejected.length, errors: rejected, rows: rows };
+    return { inserted: toInsert.length, updated: toUpdate.length, unchanged: unchanged, rejected: rejected.length, errors: rejected, rows: rows,
+      columns: PARENT_COLUMNS.map(function (c) { return c[0]; }) };   // the upload's column names, for the rejected-rows file
   });
 }
 
@@ -898,35 +793,3 @@ function pollMessageStatuses_() {
   });
   return { checked: Object.keys(wanted).length, updated: updated };
 }
-
-// ===== VoiceScripts.gs =====
-var BUILD_VoiceScripts = '20261107-1230'; // build stamp (see Build.gs)
-/** IVR call scripts per parent language. {details} = campaign values in order. */
-var VOICE_SCRIPTS = {
-  en: {
-    voice: 'Google.en-IN-Standard-A', language: 'en-IN',
-    prompt: "Hello, this is a message from your child's school about {details}. Press 1 to confirm. Press 2 if you cannot attend.",
-    invalid: 'Sorry, that is not a valid choice.',
-    confirmed: 'Thank you. Your attendance is confirmed. Goodbye.',
-    declined: 'Thank you. We have noted that you cannot attend. Goodbye.',
-    goodbye: 'We did not receive your response. Goodbye.'
-  },
-  hi: {
-    voice: 'Google.hi-IN-Standard-A', language: 'hi-IN',
-    prompt: 'नमस्ते, यह आपके बच्चे के स्कूल से संदेश है: {details}. पुष्टि करने के लिए 1 दबाएँ। अगर आप नहीं आ सकते, तो 2 दबाएँ।',
-    invalid: 'माफ़ कीजिए, यह सही विकल्प नहीं है।',
-    confirmed: 'धन्यवाद। आपकी उपस्थिति की पुष्टि हो गई है।',
-    declined: 'धन्यवाद। हमने नोट कर लिया है कि आप नहीं आ पाएँगे।',
-    goodbye: 'हमें आपका जवाब नहीं मिला। धन्यवाद।'
-  },
-  ta: {
-    voice: 'Google.ta-IN-Standard-C', language: 'ta-IN',
-    prompt: 'வணக்கம், இது உங்கள் குழந்தையின் பள்ளியிலிருந்து வரும் செய்தி: {details}. உறுதிப்படுத்த 1 ஐ அழுத்தவும். வர முடியாவிட்டால் 2 ஐ அழுத்தவும்.',
-    invalid: 'மன்னிக்கவும், அது சரியான தேர்வு அல்ல.',
-    confirmed: 'நன்றி. உங்கள் வருகை உறுதிசெய்யப்பட்டது.',
-    declined: 'நன்றி. நீங்கள் வர முடியாது என்பதை குறித்துக்கொண்டோம்.',
-    goodbye: 'உங்கள் பதில் கிடைக்கவில்லை. நன்றி.'
-  }
-};
-
-function getVoiceScript_(language) { return VOICE_SCRIPTS[language] || VOICE_SCRIPTS.en; }

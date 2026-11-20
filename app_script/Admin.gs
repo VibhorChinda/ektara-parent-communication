@@ -579,7 +579,6 @@ function checkConfig() {
   if (!c.TWILIO_WHATSAPP_FROM && !c.TWILIO_MESSAGING_SERVICE_SID) missing.push('TWILIO_WHATSAPP_FROM (or TWILIO_MESSAGING_SERVICE_SID)');
   var msg = missing.length ? 'Missing script properties: ' + missing.join(', ') : 'Configuration looks complete.';
   msg += instantUpdates_() ? ' Instant updates from Twilio: ON (Twilio address set).' : ' Instant updates from Twilio: OFF. One-address mode: statuses and replies are checked every few minutes (add PUBLIC_BASE_URL later for instant updates).';
-  msg += c.TWILIO_VOICE_FROM ? ' Voice fallback: ON.' : ' Voice fallback: OFF (WhatsApp only; set TWILIO_VOICE_FROM to enable).';
   console.log(msg);
   toast_(msg);
   return msg;

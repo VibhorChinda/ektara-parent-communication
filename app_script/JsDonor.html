@@ -20,7 +20,7 @@ const DONOR_CSV_COLS = [
   ['last donation date', 'e.g. 2026-11-18'], ['notes', '']
 ];
 const DONOR_CSV = DONOR_CSV_COLS.map(c => c[0]).join(',') + '\n';
-/** What each trigger code means, shown when you hover over it. Only T7 still runs on its own; the others are broadcasts you write, or older records. */
+/** What each trigger code means, shown when you hover over it. None runs on its own any more: messages are broadcasts you write, or older records. */
 const D_TRIGGERS = {
   T1: 'T1 Welcome (no longer automatic): a welcome to a new potential donor. Unsent messages left over from it are removed.',
   T2: 'T2 Thank-you (no longer automatic): a thank-you for a recorded donation. Unsent messages left over from it are removed.',
@@ -28,7 +28,7 @@ const D_TRIGGERS = {
   T4: 'T4 Campaign update (removed): updates to a campaign\u2019s donors are no longer sent. Unsent messages left over from it are removed.',
   T5: 'T5 Campaign results (no longer automatic): a results update used to be drafted when a campaign was marked results ready.',
   T6: 'T6 Moved to P5 (no longer automatic): campaign donors who had not given again used to move to P5.',
-  T7: 'T7 A year ago: 11 months after their last donation, last year’s donors (P4) get an “a year ago you helped” update, unless they gave again.',
+  T7: 'T7 A year ago (no longer automatic): last year’s donors (P4) used to get an “a year ago you helped” update 11 months after their last donation. Send it as a broadcast instead. Unsent messages left over from it are removed.',
   T8: 'T8 General update: a broadcast you write for the segments you choose. Needs approval.',
   T11: 'T11 Special update: a one-off broadcast written by the team. Needs approval.',
   T12: 'T12 Festive greeting: a greeting for a festival, written by the team. Dropped if not sent within 2 days of the festival.'
@@ -352,8 +352,11 @@ views['donor/campaigns'] = async function () {
   const SIZES = [10, 20, 50, 100];
   let size = 20; try { size = Number(localStorage.getItem('ektara-campaigns-size')) || 20; } catch (e) { /* storage can be blocked */ }
   const f = { q: '', arch: false, page: 1, size: SIZES.indexOf(size) >= 0 ? size : 20 };
-  const cStatus = c => label(String(c.status || 'planned').replace('_', ' '));   // a blank status counts as planned
-  const matches = c => { const q = f.q.trim().toLowerCase(); return (f.arch || !dArchived(c)) && (!q || [c.name, cStatus(c), c.status].some(v => String(v || '').toLowerCase().indexOf(q) >= 0)); };
+  // status: planned, running or closed (a blank status counts as planned; the old "results ready" status shows as closed)
+  const cSt = c => c.status === 'results_ready' ? 'closed' : (c.status || 'planned');
+  const cStatus = c => label(cSt(c));
+  const hasResults = c => !!String(c.results_text || '').trim();   // the "Results ready" label: shown whenever the campaign has a results text
+  const matches = c => { const q = f.q.trim().toLowerCase(); return (f.arch || !dArchived(c)) && (!q || [c.name, cStatus(c), cSt(c), hasResults(c) ? 'results ready' : ''].some(v => String(v || '').toLowerCase().indexOf(q) >= 0)); };
   const byCamp = {}; bcs.forEach(b => { if (b.campaign_id) (byCamp[b.campaign_id] = byCamp[b.campaign_id] || []).push(b); });
   const bcCell = c => { const l = byCamp[c.id] || [], dr = l.filter(b => b.status === 'draft').length;
     return l.length ? '<button class="btn small" data-b="' + c.id + '">' + l.length + ' broadcast' + (l.length === 1 ? '' : 's') + '</button>' + (dr ? '<div class="small" style="color:var(--warn)">' + dr + ' to approve</div>' : '') : '<span class="muted small">None</span>'; };
@@ -365,8 +368,9 @@ views['donor/campaigns'] = async function () {
   main().innerHTML = '<div class="head"><div><h1>Campaigns</h1><p class="sub" style="margin:0">Link donations and broadcasts to a campaign.</p></div><button class="btn primary" id="new">New campaign</button></div>' +
     (all.length ? '<div class="card"><div class="row">' + fld('Search', '<input id="cq" type="search" value="' + esc(f.q) + '" placeholder="Campaign name or status (planned, running, closed, results ready)">') + (nArch ? dArchSwitch('carch', f.arch, nArch) : '') + dCount(list.length, f.arch ? all.length : live, 'campaign') + '</div></div>' : '') +
     (list.length ? '<div class="card scroll"><table><thead><tr><th>Campaign</th><th>Status</th><th>Starts</th><th>Ends</th><th>Donors</th><th>Raised</th><th>Broadcasts</th><th></th></tr></thead><tbody>' + shown.map(c =>
-      '<tr' + (dArchived(c) ? ' style="opacity:.65"' : '') + '><td><b>' + esc(c.name) + '</b>' + dArchBadge(c) + '</td><td>' + badge(c.status === 'results_ready' ? 'approved' : c.status === 'running' ? 'sent' : c.status === 'closed' ? 'declined' : 'queued').replace(/>[^<]*<\/span>$/, '>' + esc(cStatus(c)) + '</span>') + '</td><td>' + esc(c.start_date || '') + '</td><td>' + esc(c.end_date || '') + '</td><td>' + c.donor_count + '</td><td>' + esc(inrFmt(c.total_raised)) + '</td><td>' + bcCell(c) + '</td>' +
-      '<td style="white-space:nowrap">' + (dArchived(c) ? '' : '<button class="btn small d-edit" data-e="' + c.id + '" title="Edit" aria-label="Edit ' + esc(c.name) + '">' + D_ICON_EDIT + '</button> ' + (c.status !== 'results_ready' ? '<button class="btn small" data-r="' + c.id + '">Results are ready</button> ' : '')) + dArchButtons('campaign', c) + '</td></tr>').join('') + '</tbody></table>' +
+      '<tr' + (dArchived(c) ? ' style="opacity:.65"' : '') + '><td><b>' + esc(c.name) + '</b>' + dArchBadge(c) + '</td><td>' + badge(cSt(c) === 'running' ? 'sent' : cSt(c) === 'closed' ? 'declined' : 'queued').replace(/>[^<]*<\/span>$/, '>' + esc(cStatus(c)) + '</span>') +
+        (hasResults(c) ? '<div style="margin-top:4px"><span class="badge b-approved" title="This campaign has a results text: it fills the campaign_result placeholder">Results ready</span></div>' : '') + '</td><td>' + esc(c.start_date || '') + '</td><td>' + esc(c.end_date || '') + '</td><td>' + c.donor_count + '</td><td>' + esc(inrFmt(c.total_raised)) + '</td><td>' + bcCell(c) + '</td>' +
+      '<td style="white-space:nowrap">' + (dArchived(c) ? '' : '<button class="btn small d-edit" data-e="' + c.id + '" title="Edit" aria-label="Edit ' + esc(c.name) + '">' + D_ICON_EDIT + '</button> ') + dArchButtons('campaign', c) + '</td></tr>').join('') + '</tbody></table>' +
       dPagerHtml(from, shown.length, list.length, f.page, pages, SIZES, f.size) + '</div>'
       : all.length ? '<div class="card empty">' + (f.q ? 'No campaigns match “' + esc(f.q) + '”.' : 'Every campaign is archived. Turn on Show archived to see them.') + '</div>' : '<div class="card">' + emptyState('send', 'No campaigns yet', 'A campaign groups the donations and broadcasts of one appeal.', { label: 'New campaign', attr: 'data-click="#new"' }) + '</div>');
   const q = $('#cq'); if (q) q.oninput = e => { f.q = e.target.value; f.page = 1; const pos = e.target.selectionStart; draw(); const n = $('#cq'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -377,7 +381,6 @@ views['donor/campaigns'] = async function () {
   $('#new').onclick = () => campaignForm(null);
   $$('[data-b]').forEach(b => b.onclick = () => campaignBroadcasts(all.find(c => c.id === b.dataset.b), byCamp[b.dataset.b] || []));
   $$('[data-e]').forEach(b => b.onclick = () => campaignForm(all.find(c => c.id === b.dataset.e)));
-  $$('[data-r]').forEach(b => b.onclick = async () => { if (!confirm('Mark results ready? The results text then fills the campaign_result placeholder. Nothing is sent.')) return; try { await call('donor.campaigns.resultsReady', b.dataset.r); toast('Marked results ready'); views['donor/campaigns'](); } catch (e) { toast(e.message, true); } });
   bindArchButtons(all);
   }
   draw();
@@ -413,7 +416,7 @@ function campaignForm(c) {
     fld('Results text (fills the campaign_result placeholder)', '<textarea id="c-res" style="min-height:60px">' + v('results_text') + '</textarea>') + '<div id="cerr"></div>' +
     '<div class="actions"><button class="btn" id="x">Cancel</button><button class="btn primary" id="s">Save</button></div>');
   $('#x', m).onclick = m.close;
-  $('#s', m).onclick = async () => { try { await call('donor.campaigns.save', c.id || null, { name: val('c-name'), start_date: val('c-start'), end_date: val('c-end'), status: c.status === 'results_ready' ? 'results_ready' : val('c-status'), progress_text: val('c-prog'), results_text: val('c-res') }); toast('Saved'); m.close(); views['donor/campaigns'](); } catch (e) { $('#cerr', m).innerHTML = errorsHtml(e); } };
+  $('#s', m).onclick = async () => { try { await call('donor.campaigns.save', c.id || null, { name: val('c-name'), start_date: val('c-start'), end_date: val('c-end'), status: val('c-status'), progress_text: val('c-prog'), results_text: val('c-res') }); toast('Saved'); m.close(); views['donor/campaigns'](); } catch (e) { $('#cerr', m).innerHTML = errorsHtml(e); } };
 }
 
 // ---------- donor templates ----------
@@ -501,7 +504,7 @@ const dBcProgress = b => b.status === 'draft' ? '\u2014' : b.counts.sent + ' sen
 /** Every message one broadcast created: who, by which channel, status, when it went, and any error or reply. */
 const D_MSG_GROUPS = [['all', 'All', null], ['sent', 'Sent', ['sent', 'delivered', 'read']], ['waiting', 'Waiting', ['queued', 'held', 'awaiting_confirmation']], ['failed', 'Failed', ['failed']], ['replies', 'Replies', ['received']]];
 async function broadcastMessages(b) {
-  const m = modal('<h2>' + esc(b.name) + ': messages</h2><p class="small muted" style="margin-top:0">' + esc(b.template_name || 'no template') + (b.campaign_name ? ' · ' + esc(b.campaign_name) : '') + (b.approved_by ? ' · approved by ' + esc(b.approved_by) + ', ' + esc(fmtDate(b.approved_at)) : '') + '</p>' +
+  const m = modal('<h2>' + esc(b.name) + ': messages</h2><p class="small muted" style="margin-top:0">' + esc(b.template_name || 'no template') + (b.campaign_name ? ' · ' + esc(b.campaign_name) : '') + (b.created_by ? ' · created by ' + esc(b.created_by) + (b.created_at ? ', ' + esc(fmtDate(b.created_at)) : '') : '') + (b.approved_by ? ' · approved by ' + esc(b.approved_by) + ', ' + esc(fmtDate(b.approved_at)) : '') + '</p>' +
     '<div id="bm"><div class="sk-top">' + stringSvg('sm') + '<span>Loading messages…</span></div></div><div class="actions"><button class="btn" id="oq">Open in Queue</button><button class="btn primary" id="x">Close</button></div>', true);
   $('#x', m).onclick = m.close;
   $('#oq', m).onclick = () => { window.__qq = b.name; m.close(); go('donor/queue'); };
@@ -518,7 +521,7 @@ async function broadcastMessages(b) {
     $('#bm', m).innerHTML = '<div class="chips" style="margin-top:0">' + groups.map(g => '<span class="chip' + (f.g === g[0] ? ' on' : '') + '" data-bg="' + g[0] + '" tabindex="0" role="button" aria-pressed="' + (f.g === g[0]) + '">' + g[1] + ' (' + n(g[0]) + ')</span>').join('') + '</div>' +
       fld('Search', '<input id="bmq" type="search" value="' + esc(f.q) + '" placeholder="Contact name">') +
       (list.length ? '<div class="d-msg-list" style="max-height:420px;margin-top:10px"><table><thead><tr><th>Contact</th><th>Channel</th><th>Status</th><th>Sent at</th><th>Details</th></tr></thead><tbody>' + list.map(r =>
-        '<tr><td>' + esc(r.donor_name) + ' ' + segTag(r.donor_segment) + '</td><td class="small">' + esc(dChannel(r)) + '</td>' +
+        '<tr><td>' + segTag(r.donor_segment) + ' ' + esc(r.donor_name) + '</td><td class="small">' + esc(dChannel(r)) + '</td>' +
         '<td>' + dBadge(r.status) + '<div class="small muted" title="' + esc(fmtDate(r.updated_at)) + '">' + esc(r.updated_at ? timeAgo(r.updated_at) : '') + '</div></td>' +
         '<td class="small">' + (r.wa_sent_at ? esc(fmtDate(r.wa_sent_at)) : '<span class="muted">—</span>') + '</td>' +
         '<td class="small muted">' + esc(r.hold_reason || r.wa_error || (r.status === 'queued' && r.not_before && Date.parse(r.not_before) > Date.now() ? 'Scheduled for ' + fmtDate(r.not_before) : '')) + (r.reply_text ? '<br>“' + esc(r.reply_text) + '”' : '') + '</td></tr>').join('') + '</tbody></table></div>'
@@ -572,7 +575,14 @@ async function broadcastForm(b) {
   const m = modal('<div id="bf"></div>', true);
   function draw() {
     // archived templates and campaigns are left out of the pickers, unless this draft already uses one (then it shows, marked)
-    const okT = tpls.filter(t => t.status === 'approved' && t.message_type === s.kind && (!dArchived(t) || t.id === s.template_id)), t = tpls.find(x => x.id === s.template_id);
+    // every approved template, of any type (General, Special, Festive, "A year ago you helped" …), grouped by type in the dropdown
+    const okT = tpls.filter(t => t.status === 'approved' && (!dArchived(t) || t.id === s.template_id)), t = tpls.find(x => x.id === s.template_id);
+    // no Kind dropdown: the kind follows the template's type (General / Special / Festive); any other type is sent as a Special update
+    if (t) s.kind = state.dmeta.kinds[t.message_type] ? t.message_type : 'special_update';
+    const tplOptions = () => { const types = state.dmeta.message_types, groups = {};
+      okT.forEach(x => { const k = types[x.message_type] ? x.message_type : ''; (groups[k] = groups[k] || []).push(x); });
+      const order = Object.keys(types).filter(k => groups[k]).concat(groups[''] ? [''] : []);
+      return order.map(k => '<optgroup label="' + esc(types[k] || 'Type not set') + '">' + groups[k].map(x => opt(x.id, x.name + ' (' + x.language + ')' + arch(x), x.id === s.template_id)).join('') + '</optgroup>').join(''); };
     const okC = camps.filter(c => !dArchived(c) || c.id === s.campaign_id), arch = x => dArchived(x) ? ' (archived)' : '';
     // One input per placeholder of the template, like the parent campaign page: {{1}}, {{2}} ... with their labels (plus the attachment of a media template).
     // A label the app fills itself (amount, donor_name ...) comes from each contact's record; what is typed here is used for contacts whose record has no value.
@@ -584,9 +594,8 @@ async function broadcastForm(b) {
       : fld('{{' + x.n + '}} ' + esc(x.label) + (x.auto ? ' <span class="small muted">(from each contact’s record)</span>' : ''),
         '<input data-v="' + esc(x.key) + '" value="' + esc(s.values[x.key] || '') + '" placeholder="' + esc(x.auto ? 'Used only when a contact has no value' : ((t.sample_values || {})[x.n] || '')) + '">');
     $('#bf', m).innerHTML = '<h2>' + (s.id ? 'Review broadcast' : 'New broadcast') + '</h2><div class="grid2">' + fld('Name', '<input id="b-name" value="' + esc(s.name) + '">') +
-      fld('Kind', '<select id="b-kind">' + Object.keys(state.dmeta.kinds).map(k => opt(k, state.dmeta.kinds[k], k === s.kind)).join('') + '</select>') +
-      fld('Template (approved, same type)', '<select id="b-tpl">' + opt('', okT.length ? 'Choose\u2026' : 'No approved template of this type', !s.template_id) + okT.map(x => opt(x.id, x.name + ' (' + x.language + ')' + arch(x), x.id === s.template_id)).join('') + '</select>') +
-      fld('Send on (empty = as soon as approved)', '<input id="b-on" type="date" value="' + esc(s.send_on) + '">') + (s.kind === 'festive_greeting' ? fld('Festival date (greeting is dropped 2 days after)', '<input id="b-ev" type="date" value="' + esc(s.event_date) + '">') : '') +
+      fld('Template (approved, any type)', '<select id="b-tpl">' + opt('', okT.length ? 'Choose\u2026' : 'No approved template yet', !s.template_id) + tplOptions() + '</select>') +
+      fld('Send on (empty = as soon as approved)', '<input id="b-on" type="date" value="' + esc(s.send_on) + '">') + (t && s.kind === 'festive_greeting' ? fld('Festival date (greeting is dropped 2 days after)', '<input id="b-ev" type="date" value="' + esc(s.event_date) + '">') : '') +
       fld('Campaign (optional: links it to a campaign; does not add its donors)', '<select id="b-camp">' + opt('', 'None', !s.campaign_id) + okC.map(c => opt(c.id, c.name + arch(c), c.id === s.campaign_id)).join('') + '</select>') + '</div>' +
       '<label>Also send to these segments</label><div class="checks">' + Object.keys(state.dmeta.segments).map(c => '<label><input type="checkbox" data-sg="' + c + '" ' + (s.segments.indexOf(c) >= 0 ? 'checked' : '') + '> ' + c + ' ' + esc(state.dmeta.segments[c]) + '</label>').join('') + '</div>' + tagBox() +
       (slots.length ? '<label>Values for this send</label><div class="grid2">' + slots.map(slotField).join('') + '</div>' +
@@ -595,7 +604,6 @@ async function broadcastForm(b) {
       '<button class="btn" id="sv" title="Save it as a draft in the Broadcasts list (and show the preview)">Save draft</button>' +
       '<button class="btn primary" id="pv" title="Check the text and who gets it. Nothing is saved">Preview</button></div>';
     $('#x', m).onclick = m.close;
-    $('#b-kind', m).onchange = e => { grab(); s.kind = e.target.value; s.template_id = ''; draw(); };
     $('#b-tpl', m).onchange = () => { grab(); draw(); };
     $$('[data-sg]', m).forEach(c => c.onchange = () => { grab(); draw(); });
     $$('[data-tg]', m).forEach(c => c.onclick = () => {
@@ -709,7 +717,7 @@ views['donor/queue'] = async function () {
         '<div class="d-pager"><span class="small muted">Showing ' + (from + 1) + '–' + (from + shown.length) + ' of ' + list.length + '</span>' +
         '<label class="d-pager-size">Rows per page <select id="psize">' + [10, 20, 50, 100].map(n => opt(n, n, n === f.size)).join('') + '</select></label>' +
         '<span class="d-pager-nav"><button class="btn small" id="pprev"' + (f.page <= 1 ? ' disabled' : '') + ' aria-label="Previous page">‹ Prev</button><span class="small"><b>' + f.page + '</b> / ' + pages + '</span><button class="btn small" id="pnext"' + (f.page >= pages ? ' disabled' : '') + ' aria-label="Next page">Next ›</button></span></div>'
-        : all.length ? '<div class="empty">No messages match \u201c' + esc(f.q) + '\u201d.</div>' : emptyState('list', 'Nothing here', 'Messages appear in the queue as soon as a broadcast is approved, or when the T7 rule creates one.', null)) + '</div>';
+        : all.length ? '<div class="empty">No messages match \u201c' + esc(f.q) + '\u201d.</div>' : emptyState('list', 'Nothing here', 'Messages appear in the queue as soon as a broadcast is approved.', null)) + '</div>';
     const qq = $('#qq'); if (qq) qq.oninput = e => { f.q = e.target.value; f.page = 1; const pos = e.target.selectionStart; draw(); const n = $('#qq'); n.focus(); n.setSelectionRange(pos, pos); };
     if ($('#psize')) $('#psize').onchange = e => { f.size = Number(e.target.value); f.page = 1; try { localStorage.setItem('ektara-queue-size', f.size); } catch (err) { /* ignore */ } draw(); };
     if ($('#pprev')) $('#pprev').onclick = () => { f.page--; draw(); };
